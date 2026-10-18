@@ -47,6 +47,8 @@ v1 支持的触发器：
 | `wifi_state` | `watch`: `connected` / `disconnected` / `any` | Wi-Fi 连上或断开时触发 |
 | `power_state` | `watch`: `connected` / `disconnected` / `any` | 插上或拔掉电源时触发 |
 | `notification` | `pkg`（空为任意）、`label`（显示用）、`keyword`（空为不限） | 收到通知时触发，需要「通知使用权」 |
+| `bluetooth_state` | `watch`、`mac`（空为任意设备）、`label`（显示用） | 蓝牙设备连上或断开时触发。Android 12 起读设备名需要 `BLUETOOTH_CONNECT` |
+| `time_daily` | `hhmm`（"HH:mm"）、`days`（"1,3,5"，周一=1；空串=每天） | 每天固定时间触发，走 `AlarmManager`。没拿到精确闹钟权限时退化成 10 分钟窗口 |
 | `manual` | 无 | 只能手动运行，用来测试 |
 
 触发器只负责「什么时候跑」，不做判断。判断是树里的事。这个分离是故意的：
@@ -115,6 +117,9 @@ v1 支持的叶子条件：
 
 界面上目前只展开一层组里的内容，再深的组用「点进去」的方式逐层编辑，
 但存储和求值都是递归的，手写 JSON 放到多少层都能正确执行。
+
+`children` 的**顺序就是求值顺序**。短路规则下顺序有意义：把最容易判否的条件放前面，
+能少算几次。界面上长按行首的把手可以拖动调顺序，改完直接写回这个数组。
 
 ### Action（动作）
 

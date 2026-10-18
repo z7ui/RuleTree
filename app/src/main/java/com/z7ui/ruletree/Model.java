@@ -96,9 +96,42 @@ public class Model {
                     if (!kw.isEmpty()) v += "，内容含「" + kw + "」";
                     return v;
                 }
+                case "bluetooth_state": {
+                    String w = watch();
+                    String v = "connected".equals(w) ? "连上蓝牙设备时"
+                            : "disconnected".equals(w) ? "断开蓝牙设备时" : "蓝牙连接变化时";
+                    String label = params.optString("label", "");
+                    return label.isEmpty() ? v : v + "（" + label + "）";
+                }
+                case "time_daily": {
+                    String hhmm = params.optString("hhmm", "07:00");
+                    String days = params.optString("days", "");
+                    return days.isEmpty() ? "每天 " + hhmm : daysText(days) + " " + hhmm;
+                }
                 default:
                     return "手动运行";
             }
+        }
+
+        /** 「1,3,5」→「每周一、三、五」。空串返回「每天」。 */
+        public static String daysText(String days) {
+            if (days == null || days.isEmpty()) return "每天";
+            if ("1,2,3,4,5".equals(days)) return "工作日";
+            if ("6,7".equals(days)) return "周末";
+            String[] names = {"一", "二", "三", "四", "五", "六", "日"};
+            StringBuilder sb = new StringBuilder("每周");
+            boolean first = true;
+            for (String p : days.split(",")) {
+                try {
+                    int v = Integer.parseInt(p.trim());
+                    if (v < 1 || v > 7) continue;
+                    if (!first) sb.append("、");
+                    sb.append(names[v - 1]);
+                    first = false;
+                } catch (Exception ignored) {
+                }
+            }
+            return first ? "每天" : sb.toString();
         }
     }
 

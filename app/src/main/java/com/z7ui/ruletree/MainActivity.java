@@ -194,9 +194,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAbout() {
         String body = "把「如果……则……否则……」做成可复用的规则。触发器和动作分开，条件成立走一边，不成立走另一边。\n\n"
                 + "· 规则存成 JSON 树，支持任意层级嵌套\n"
-                + "· 触发器：Wi-Fi 状态、电源状态、手动\n"
-                + "· 条件：连着 Wi-Fi、充电中、电量、时间段，都可取反\n"
-                + "· 动作：铃声模式、媒体音量、打开应用、发通知\n\n"
+                + "· 触发器：Wi-Fi、电源、蓝牙、收到通知、每天定时、手动\n"
+                + "· 条件：连着指定 Wi-Fi、充电中、电量、时间段，都能取反，也能组合成「并且 / 或者」\n"
+                + "· 动作：铃声模式、媒体音量、打开应用、发通知、等待、执行前确认\n\n"
                 + "作者  Deepseek · B站 @z7ui\n"
                 + "仓库  github.com/z7ui/RuleTree\n\n"
                 + "版本  " + versionName();
@@ -233,9 +233,16 @@ public class MainActivity extends AppCompatActivity {
 
             name.setText(r.name);
             trigger.setText("触发：" + r.trigger.describe());
-            cond.setText("条件：" + (r.tree.condition == null ? "?" : r.tree.condition.describe()));
-            then.setText("则：" + summarize(r.tree.then)
-                    + (r.tree.otherwise.isEmpty() ? "" : "　否则：" + summarize(r.tree.otherwise)));
+
+            // 没有分支的规则存成 seq，卡片上就别显示「条件：?」了
+            boolean branched = "if".equals(r.tree.type) && r.tree.condition != null;
+            cond.setVisibility(branched ? View.VISIBLE : View.GONE);
+            if (branched) cond.setText("条件：" + r.tree.condition.describe());
+
+            List<Model.Node> main = branched ? r.tree.then : r.tree.children;
+            then.setText(branched ? "则：" + summarize(main)
+                    + (r.tree.otherwise.isEmpty() ? "" : "　否则：" + summarize(r.tree.otherwise))
+                    : "做：" + summarize(main));
 
             sw.setChecked(r.enabled);
             sw.setOnCheckedChangeListener((b, checked) -> {

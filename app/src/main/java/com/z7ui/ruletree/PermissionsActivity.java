@@ -1,6 +1,7 @@
 package com.z7ui.ruletree;
 
 import android.Manifest;
+import android.app.AlarmManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -77,6 +78,12 @@ public class PermissionsActivity extends AppCompatActivity {
                 .contains(getPackageName());
         addRow("通知使用权", "用「收到通知」触发规则时要开。不开的话这类触发器永远不响，\n别的功能不受影响，所以没算进上面的统计。",
                 listener, v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+
+        addRow("蓝牙连接", "用「蓝牙」触发规则时要给。不给的话只知道有设备连上或断开，\n读不到是哪一台，限定了设备的规则不会触发。",
+                btGranted(), v -> requestBt());
+
+        addRow("精确闹钟", "用「每天固定时间」时要给。不给的话定时会退成 10 分钟窗口，\n可能晚几分钟才跑。",
+                exactAlarm(), v -> openExactAlarm());
 
         addRow("勿扰访问", "必须。改铃声模式和媒体音量都要它，没有的话动作会被系统静默忽略。",
                 dnd, v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
@@ -161,6 +168,16 @@ public class PermissionsActivity extends AppCompatActivity {
         return nm != null && nm.isNotificationPolicyAccessGranted();
     }
 
+    private boolean btGranted() {
+        return Build.VERSION.SDK_INT < 31 || has("android.permission.BLUETOOTH_CONNECT");
+    }
+
+    private boolean exactAlarm() {
+        if (Build.VERSION.SDK_INT < 31) return true;
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        return am != null && am.canScheduleExactAlarms();
+    }
+
     private boolean ignoringBattery() {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
@@ -186,6 +203,34 @@ public class PermissionsActivity extends AppCompatActivity {
         } else {
             Toast.makeText(this, "这个系统版本不需要单独授权", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void requestBt() {
+        if (Build.VERSION.SDK_INT < 31) {
+            Toast.makeText(this, "这个系统版本不需要单独授权", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (btGranted()) {
+            Toast.makeText(this, "已经授权了", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        requestPermissions(new String[]{"android.permission.BLUETOOTH_CONNECT"}, 32);
+    }
+
+    private void openExactAlarm() {
+        if (Build.VERSION.SDK_INT < 31) {
+            Toast.makeText(this, "这个系统版本不需要单独授权", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (exactAlarm()) {
+            Toast.makeText(this, "已经允许了", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent direct = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                Uri.parse("package:" + getPackageName()));
+        if (startSafely(direct)) return;
+        startSafely(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName())));
     }
 
     private void openBattery() {

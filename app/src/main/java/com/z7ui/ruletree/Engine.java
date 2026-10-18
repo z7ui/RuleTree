@@ -55,6 +55,32 @@ public class Engine {
         });
     }
 
+    /** 蓝牙触发：参数里可以限定设备 MAC，空表示任意设备。 */
+    public static void fireBluetooth(final Context c, final String watch, final String mac) {
+        final Context app = c.getApplicationContext();
+        WORKER.execute(() -> {
+            Logx.i(app, "蓝牙" + ("connected".equals(watch) ? "已连接" : "已断开")
+                    + (mac == null || mac.isEmpty() ? "" : "（" + mac + "）"));
+            int hit = 0;
+            for (Model.Rule r : RuleStore.load(app)) {
+                if (!r.enabled || !"bluetooth_state".equals(r.trigger.type)) continue;
+                String w = r.trigger.watch();
+                if (!"any".equals(w) && !w.equals(watch)) continue;
+                String wantMac = r.trigger.params.optString("mac", "");
+                if (!wantMac.isEmpty() && (mac == null || !wantMac.equalsIgnoreCase(mac))) continue;
+                Logx.i(app, "规则命中：" + r.name);
+                run(app, r);
+                hit++;
+            }
+            if (hit == 0) Logx.i(app, "没有匹配的蓝牙规则");
+        });
+    }
+
+    /** 给广播接收器用：动作里可能有等待，别在接收器线程里跑。 */
+    public static void runAsync(final Context c, final Model.Rule r) {
+        WORKER.execute(() -> run(c.getApplicationContext(), r));
+    }
+
     private static void fireNow(Context c, String triggerType, String watch) {
         Logx.i(c, "触发器 " + triggerType + "（" + watch + "）");
         List<Model.Rule> rules = RuleStore.load(c);

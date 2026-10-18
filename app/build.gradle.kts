@@ -23,8 +23,8 @@ android {
         applicationId = "com.z7ui.ruletree"
         minSdk = 27
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5"
+        versionCode = 6
+        versionName = "0.6"
     }
 
     signingConfigs {
@@ -64,5 +64,6 @@ android {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core:1.13.1")
+    // RecyclerView 由 material 带进来，单独写版本号容易和缓存里的对不上
     implementation("com.google.android.material:material:1.12.0")
 }

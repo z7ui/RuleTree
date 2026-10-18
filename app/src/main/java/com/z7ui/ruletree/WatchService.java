@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -49,6 +50,7 @@ public class WatchService extends Service {
     private ConnectivityManager cm;
     private ConnectivityManager.NetworkCallback wifiCallback;
     private BroadcastReceiver powerReceiver;
+    private BroadcastReceiver btReceiver;
 
     public static void start(Context c) {
         ContextCompat.startForegroundService(c, new Intent(c, WatchService.class));
@@ -64,6 +66,8 @@ public class WatchService extends Service {
         for (Model.Rule r : RuleStore.load(c)) {
             if (r.enabled) enabled++;
         }
+        // 定时规则不依赖这个服务，任何时候都重排一遍
+        TimeScheduler.sync(c);
         if (enabled > 0) start(c);
         else stop(c);
     }
@@ -79,6 +83,7 @@ public class WatchService extends Service {
 
         registerWifiCallback();
         registerPowerReceiver();
+        registerBluetoothReceiver();
 
         handler.removeCallbacks(poll);
         handler.postDelayed(poll, POLL_MS);
@@ -180,6 +185,55 @@ public class WatchService extends Service {
         ContextCompat.registerReceiver(this, powerReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
+    // ---------------- 蓝牙 ----------------
+
+    /**
+     * ACL 广播只有运行时注册收得到，所以要挂在这个服务里。
+     * 读设备名和 MAC 需要 BLUETOOTH_CONNECT，没授权时拿到的都是 null，
+     * 这条规则如果限定了设备就匹配不上，不会误触发。
+     */
+    private void registerBluetoothReceiver() {
+        if (btReceiver != null) return;
+        btReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent i) {
+                String a = i.getAction();
+                boolean connected = BluetoothDevice.ACTION_ACL_CONNECTED.equals(a);
+                if (!connected && !BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(a)) return;
+
+                BluetoothDevice dev = null;
+                try {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        dev = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE,
+                                BluetoothDevice.class);
+                    } else {
+                        dev = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    }
+                } catch (Exception ignored) {
+                }
+
+                String mac = null;
+                String name = null;
+                try {
+                    if (dev != null) {
+                        mac = dev.getAddress();
+                        name = dev.getName();
+                    }
+                } catch (Exception e) {
+                    Logx.i(WatchService.this, "读蓝牙设备信息失败（缺 BLUETOOTH_CONNECT）");
+                }
+                Logx.i(WatchService.this, "蓝牙" + (connected ? "连上" : "断开") + " "
+                        + (name != null ? name : (mac != null ? mac : "未知设备")));
+                Engine.fireBluetooth(WatchService.this,
+                        connected ? "connected" : "disconnected", mac);
+            }
+        };
+        IntentFilter f = new IntentFilter();
+        f.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+        f.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        ContextCompat.registerReceiver(this, btReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
     // ---------------- 前台通知 ----------------
 
     private void startForegroundCompat() {
@@ -196,7 +250,7 @@ public class WatchService extends Service {
         Notification n = new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
                 .setContentTitle("规则树在监听")
-                .setContentText("Wi-Fi 和电源状态变化会触发规则")
+                .setContentText("Wi-Fi、电源、蓝牙和定时会触发规则")
                 .setOngoing(true)
                 .setContentIntent(pi)
                 .build();
@@ -224,6 +278,13 @@ public class WatchService extends Service {
             } catch (Exception ignored) {
             }
             powerReceiver = null;
+        }
+        if (btReceiver != null) {
+            try {
+                unregisterReceiver(btReceiver);
+            } catch (Exception ignored) {
+            }
+            btReceiver = null;
         }
         started = false;
         Logx.i(this, "监听服务已停止");

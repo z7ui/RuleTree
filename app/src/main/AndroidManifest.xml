@@ -6,6 +6,11 @@
     <!-- 读 Wi-Fi SSID 需要定位权限，运行时申请 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 读蓝牙设备名和 MAC。Android 12 之前是普通 BLUETOOTH -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 定时规则要用精确闹钟；没有的话退化成 10 分钟窗口 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -48,6 +53,10 @@
         <receiver
             android:name=".ConfirmReceiver"
             android:exported="true" />
+
+        <receiver
+            android:name=".TimeReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

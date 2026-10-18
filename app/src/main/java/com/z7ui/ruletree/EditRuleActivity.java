@@ -2,6 +2,9 @@ package com.z7ui.ruletree;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -11,21 +14,29 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.ItemTouchHelper;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.appbar.MaterialToolbar;
 
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 编辑页。树是递归的，界面也递归：任意一层都能加「动作」或再嵌一个「条件分支」。
@@ -300,6 +311,8 @@ public class EditRuleActivity extends AppCompatActivity {
                 "Wi-Fi 连上时", "Wi-Fi 断开时", "Wi-Fi 状态变化时",
                 "插上电源时", "拔掉电源时", "电源状态变化时",
                 "收到通知时",
+                "连上蓝牙设备时", "断开蓝牙设备时", "蓝牙连接变化时",
+                "每天固定时间",
                 "手动运行"
         };
         new AlertDialog.Builder(this)
@@ -335,6 +348,18 @@ public class EditRuleActivity extends AppCompatActivity {
                             case 6:
                                 pickNotificationTrigger();
                                 return;
+                            case 7:
+                                pickBluetooth("connected");
+                                return;
+                            case 8:
+                                pickBluetooth("disconnected");
+                                return;
+                            case 9:
+                                pickBluetooth("any");
+                                return;
+                            case 10:
+                                pickTime();
+                                return;
                             default:
                                 t.type = "manual";
                                 break;
@@ -343,7 +368,104 @@ public class EditRuleActivity extends AppCompatActivity {
                     }
                     rule.trigger = t;
                     render();
+                    WatchService.sync(this);
                 })
+                .show();
+    }
+
+    /** 蓝牙触发：列已配对的设备，也可以不限。 */
+    private void pickBluetooth(final String watch) {
+        if (Build.VERSION.SDK_INT >= 31
+                && checkSelfPermission("android.permission.BLUETOOTH_CONNECT")
+                != PackageManager.PERMISSION_GRANTED) {
+            new AlertDialog.Builder(this)
+                    .setTitle("需要蓝牙权限")
+                    .setMessage("Android 12 起，读设备名和地址要单独授权。\n不给也能用「任意设备」，只是分不清是哪一台。")
+                    .setPositiveButton("去授权", (d, w) ->
+                            startActivity(new Intent(this, PermissionsActivity.class)))
+                    .setNeutralButton("任意设备", (d, w) -> applyBluetooth(watch, "", ""))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+
+        final List<String> labels = new ArrayList<>();
+        final List<String> macs = new ArrayList<>();
+        labels.add("任意蓝牙设备");
+        macs.add("");
+        try {
+            BluetoothAdapter ad = BluetoothAdapter.getDefaultAdapter();
+            Set<BluetoothDevice> bonded = ad == null ? null : ad.getBondedDevices();
+            if (bonded != null) {
+                for (BluetoothDevice d : bonded) {
+                    String name = d.getName();
+                    labels.add(name == null || name.isEmpty() ? d.getAddress() : name);
+                    macs.add(d.getAddress());
+                }
+            }
+        } catch (Exception e) {
+            Logx.i(this, "读取已配对设备失败: " + e);
+        }
+        if (labels.size() == 1) labels.add("（没有已配对的设备，先随便选着）");
+
+        new AlertDialog.Builder(this)
+                .setTitle("哪台设备")
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    if (which >= macs.size()) return;
+                    String label = which == 0 ? "" : labels.get(which);
+                    applyBluetooth(watch, macs.get(which), label);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void applyBluetooth(String watch, String mac, String label) {
+        Model.Trigger t = new Model.Trigger();
+        t.type = "bluetooth_state";
+        try {
+            t.params.put("watch", watch);
+            t.params.put("mac", mac);
+            t.params.put("label", label);
+        } catch (Exception ignored) {
+        }
+        rule.trigger = t;
+        render();
+    }
+
+    /** 每天固定时间：先选时刻，再选星期，都不选就是每天。 */
+    private void pickTime() {
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        new android.app.TimePickerDialog(this, (view, h, m) ->
+                askWeekdays(String.format(java.util.Locale.CHINA, "%02d:%02d", h, m)),
+                now.get(java.util.Calendar.HOUR_OF_DAY),
+                now.get(java.util.Calendar.MINUTE), true).show();
+    }
+
+    private void askWeekdays(final String hhmm) {
+        final String[] names = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+        final boolean[] checked = new boolean[7];
+        new AlertDialog.Builder(this)
+                .setTitle(hhmm + " 哪几天跑")
+                .setMultiChoiceItems(names, checked, (d, which, isChecked) -> checked[which] = isChecked)
+                .setMessage("都不勾就是每天。")
+                .setPositiveButton("确定", (d, w) -> {
+                    StringBuilder days = new StringBuilder();
+                    for (int i = 0; i < 7; i++) {
+                        if (!checked[i]) continue;
+                        if (days.length() > 0) days.append(",");
+                        days.append(i + 1);
+                    }
+                    Model.Trigger t = new Model.Trigger();
+                    t.type = "time_daily";
+                    try {
+                        t.params.put("hhmm", hhmm);
+                        t.params.put("days", days.toString());
+                    } catch (Exception ignored) {
+                    }
+                    rule.trigger = t;
+                    render();
+                })
+                .setNegativeButton("取消", null)
                 .show();
     }
 
@@ -438,97 +560,111 @@ public class EditRuleActivity extends AppCompatActivity {
     private void editGroup(final Model.Cond group, final CondTarget attachTo) {
         final boolean isNewGroup = group.children.isEmpty();
 
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(20), dp(4), dp(20), dp(4));
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(20), dp(4), dp(20), dp(4));
+
+        final TextView mode = new TextView(this);
+        mode.setTextSize(15);
+        mode.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
+        mode.setPadding(0, dp(8), 0, dp(2));
+        mode.setOnClickListener(v -> {
+            group.op = "any".equals(group.op) ? "all" : "any";
+            render();
+        });
+        root.addView(mode);
+
+        final TextView tip = new TextView(this);
+        tip.setText("点文字改这一条，拖左边的 ≡ 调顺序");
+        tip.setTextSize(12);
+        tip.setPadding(0, 0, 0, dp(4));
+        root.addView(tip);
+
+        final TextView empty = new TextView(this);
+        empty.setText("还没有条件，点下面的按钮加一条");
+        empty.setTextSize(13);
+        empty.setPadding(0, dp(4), 0, dp(8));
+        root.addView(empty);
+
+        final CondAdapter adapter = new CondAdapter(group);
+        RecyclerView rv = new RecyclerView(this);
+        rv.setLayoutManager(new LinearLayoutManager(this));
+        rv.setAdapter(adapter);
+        // 弹窗里不再套 ScrollView，列表自己滚，否则拖动时手势会被外层抢走
+        rv.setNestedScrollingEnabled(false);
+        LinearLayout.LayoutParams rvlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(260));
+        rv.setLayoutParams(rvlp);
+        root.addView(rv);
+
+        final ItemTouchHelper helper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(
+                ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
+            @Override
+            public boolean onMove(@NonNull RecyclerView r,
+                                  @NonNull RecyclerView.ViewHolder from,
+                                  @NonNull RecyclerView.ViewHolder to) {
+                // 老版本 RecyclerView 没有 getBindingAdapterPosition，用这个通用的
+                int f = from.getAdapterPosition();
+                int t = to.getAdapterPosition();
+                if (f < 0 || t < 0 || f == t) return false;
+                Collections.swap(group.children, f, t);
+                adapter.notifyItemMoved(f, t);
+                return true;
+            }
+
+            @Override
+            public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {
+            }
+
+            @Override
+            public void clearView(@NonNull RecyclerView r, @NonNull RecyclerView.ViewHolder vh) {
+                super.clearView(r, vh);
+                // 顺序变了，主界面那句摘要也要跟着变
+                render();
+            }
+        });
+        helper.attachToRecyclerView(rv);
+        adapter.helper = helper;
 
         final Runnable fill = new Runnable() {
             @Override
             public void run() {
-                box.removeAllViews();
-
-                TextView mode = new TextView(EditRuleActivity.this);
                 boolean any = "any".equals(group.op);
                 mode.setText(any ? "满足任意一条（或者）　点这里切换"
                         : "满足全部条件（并且）　点这里切换");
-                mode.setTextSize(15);
-                mode.setTextColor(ContextCompat.getColor(EditRuleActivity.this, R.color.perm_ok));
-                mode.setPadding(0, dp(10), 0, dp(12));
-                mode.setOnClickListener(v -> {
-                    group.op = "any".equals(group.op) ? "all" : "any";
-                    render();
-                });
-                box.addView(mode);
-
-                if (group.children.isEmpty()) {
-                    TextView empty = new TextView(EditRuleActivity.this);
-                    empty.setText("还没有条件，点下面的按钮加一条");
-                    empty.setTextSize(13);
-                    empty.setPadding(0, dp(2), 0, dp(10));
-                    box.addView(empty);
-                }
-
-                for (int i = 0; i < group.children.size(); i++) {
-                    final Model.Cond child = group.children.get(i);
-
-                    LinearLayout row = new LinearLayout(EditRuleActivity.this);
-                    row.setOrientation(LinearLayout.HORIZONTAL);
-                    row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setPadding(0, dp(6), 0, dp(6));
-
-                    TextView text = new TextView(EditRuleActivity.this);
-                    text.setText((i + 1) + ". " + child.describe());
-                    text.setTextSize(15);
-                    text.setLayoutParams(new LinearLayout.LayoutParams(0,
-                            LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-                    text.setOnClickListener(v -> editChild(group, child));
-                    row.addView(text);
-
-                    TextView del = new TextView(EditRuleActivity.this);
-                    del.setText("删除");
-                    del.setTextSize(13);
-                    del.setPadding(dp(10), dp(6), dp(2), dp(6));
-                    del.setOnClickListener(v -> {
-                        group.children.remove(child);
-                        render();
-                    });
-                    row.addView(del);
-
-                    box.addView(row);
-                }
-
-                TextView add = new TextView(EditRuleActivity.this);
-                add.setText("＋ 添加条件");
-                add.setTextSize(14);
-                add.setTextColor(ContextCompat.getColor(EditRuleActivity.this, R.color.perm_ok));
-                add.setPadding(0, dp(10), 0, dp(4));
-                add.setOnClickListener(v -> {
-                    condTarget = new CondTarget() {
-                        @Override
-                        Model.Cond get() {
-                            return null;
-                        }
-
-                        @Override
-                        void set(Model.Cond c) {
-                            group.children.add(c);
-                        }
-                    };
-                    pickCondition();
-                });
-                box.addView(add);
+                empty.setVisibility(group.children.isEmpty() ? View.VISIBLE : View.GONE);
+                rv.setVisibility(group.children.isEmpty() ? View.GONE : View.VISIBLE);
+                adapter.notifyDataSetChanged();
             }
         };
+
+        TextView add = new TextView(this);
+        add.setText("＋ 添加条件");
+        add.setTextSize(14);
+        add.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
+        add.setPadding(0, dp(10), 0, dp(4));
+        add.setOnClickListener(v -> {
+            condTarget = new CondTarget() {
+                @Override
+                Model.Cond get() {
+                    return null;
+                }
+
+                @Override
+                void set(Model.Cond c) {
+                    group.children.add(c);
+                }
+            };
+            pickCondition();
+        });
+        root.addView(add);
 
         groupRefreshers.add(fill);
         fill.run();
 
-        android.widget.ScrollView sv = new android.widget.ScrollView(this);
-        sv.addView(box);
-
         new AlertDialog.Builder(this)
                 .setTitle("组合条件")
-                .setView(sv)
+                .setView(root)
                 .setPositiveButton("完成", (d, w) -> {
                     groupRefreshers.remove(fill);
                     if (group.children.isEmpty()) {
@@ -542,6 +678,84 @@ public class EditRuleActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("取消", (d, w) -> groupRefreshers.remove(fill))
                 .show();
+    }
+
+    /** 组合条件里的一行：左边把手用来拖，中间文字点开改，右边删除。 */
+    private class CondAdapter extends RecyclerView.Adapter<CondAdapter.CondVH> {
+
+        final Model.Cond group;
+        ItemTouchHelper helper;
+
+        CondAdapter(Model.Cond g) {
+            group = g;
+        }
+
+        @NonNull
+        @Override
+        public CondVH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            LinearLayout row = new LinearLayout(EditRuleActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(8), 0, dp(8));
+            row.setLayoutParams(new RecyclerView.LayoutParams(
+                    RecyclerView.LayoutParams.MATCH_PARENT,
+                    RecyclerView.LayoutParams.WRAP_CONTENT));
+
+            TextView handle = new TextView(EditRuleActivity.this);
+            handle.setText("≡");
+            handle.setTextSize(18);
+            handle.setPadding(dp(2), dp(2), dp(12), dp(2));
+            row.addView(handle);
+
+            TextView text = new TextView(EditRuleActivity.this);
+            text.setTextSize(15);
+            text.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(text);
+
+            TextView del = new TextView(EditRuleActivity.this);
+            del.setText("删除");
+            del.setTextSize(13);
+            del.setPadding(dp(10), dp(6), dp(2), dp(6));
+            row.addView(del);
+
+            return new CondVH(row, handle, text, del);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull final CondVH h, int position) {
+            final Model.Cond child = group.children.get(position);
+            h.text.setText((position + 1) + ". " + child.describe());
+            h.text.setOnClickListener(v -> editChild(group, child));
+            h.del.setOnClickListener(v -> {
+                group.children.remove(child);
+                render();
+            });
+            h.handle.setOnTouchListener((v, e) -> {
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN && helper != null) {
+                    helper.startDrag(h);
+                }
+                return true;
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return group.children.size();
+        }
+
+        class CondVH extends RecyclerView.ViewHolder {
+            final TextView handle;
+            final TextView text;
+            final TextView del;
+
+            CondVH(View itemView, TextView handle, TextView text, TextView del) {
+                super(itemView);
+                this.handle = handle;
+                this.text = text;
+                this.del = del;
+            }
+        }
     }
 
     /** 点组合里的某一条：本身是组合就继续往下编，是叶子就重新选一遍。 */

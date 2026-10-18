@@ -144,7 +144,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="+ 添加动作"
+                android:text="＋ 添加动作或分支"
                 android:textSize="13sp" />
 
             <TextView
@@ -167,7 +167,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="+ 添加动作"
+                android:text="＋ 添加动作或分支"
                 android:textSize="13sp" />
 
             <LinearLayout

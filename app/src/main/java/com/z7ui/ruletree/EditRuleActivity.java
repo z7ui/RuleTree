@@ -18,6 +18,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.appbar.MaterialToolbar;
 
@@ -27,15 +28,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 编辑页。第一版的界面只暴露「一个条件 + 两组动作」，
- * 但底下存的是任意嵌套的树，以后要加嵌套分支只改这里，不动存储。
+ * 编辑页。树是递归的，界面也递归：任意一层都能加「动作」或再嵌一个「条件分支」。
+ * 存储格式见 DATA-MODEL.md，节点只有 action / if / seq 三种。
  */
 public class EditRuleActivity extends AppCompatActivity {
-
-    private static final int ID_ACTION_RINGER = 0;
-    private static final int ID_ACTION_VOLUME = 1;
-    private static final int ID_ACTION_OPEN = 2;
-    private static final int ID_ACTION_NOTIFY = 3;
 
     private Model.Rule rule;
     private boolean isNew;
@@ -46,6 +42,13 @@ public class EditRuleActivity extends AppCompatActivity {
     private Model.Cond cond = new Model.Cond();
     private final List<Model.Node> thenList = new ArrayList<>();
     private final List<Model.Node> elseList = new ArrayList<>();
+
+    /** 当前正在编辑的条件归属，点选条件时用。 */
+    private interface CondTarget {
+        void set(Model.Cond c);
+    }
+
+    private CondTarget condTarget;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,13 +75,22 @@ public class EditRuleActivity extends AppCompatActivity {
 
         findViewById(R.id.rowName).setOnClickListener(v -> editName());
         findViewById(R.id.rowTrigger).setOnClickListener(v -> pickTrigger());
-        findViewById(R.id.rowCond).setOnClickListener(v -> pickCondition());
-        findViewById(R.id.btnAddThen).setOnClickListener(v -> pickAction(thenList));
-        findViewById(R.id.btnAddElse).setOnClickListener(v -> pickAction(elseList));
+        findViewById(R.id.rowCond).setOnClickListener(v -> {
+            condTarget = c -> cond = c;
+            pickCondition();
+        });
+        findViewById(R.id.btnAddThen).setOnClickListener(v ->
+                addChooser(thenList, "条件成立时"));
+        findViewById(R.id.btnAddElse).setOnClickListener(v ->
+                addChooser(elseList, "条件不成立时"));
         findViewById(R.id.btnTest).setOnClickListener(v -> {
-            Model.Rule probe = build();
-            Engine.run(this, probe);
-            Toast.makeText(this, "已执行，去主界面「查看日志」看结果", Toast.LENGTH_LONG).show();
+            final Model.Rule probe = build();
+            Toast.makeText(this, "开始执行…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                Engine.run(getApplicationContext(), probe);
+                runOnUiThread(() -> Toast.makeText(this, "执行完了，主界面菜单能看日志",
+                        Toast.LENGTH_SHORT).show());
+            }).start();
         });
         findViewById(R.id.btnSave).setOnClickListener(v -> save());
         findViewById(R.id.btnDelete).setVisibility(isNew ? View.GONE : View.VISIBLE);
@@ -87,7 +99,8 @@ public class EditRuleActivity extends AppCompatActivity {
         render();
     }
 
-    /** 把树读回编辑器的三个字段。seq 视为「无条件，顺序执行」。 */
+    // ---------------- 载入与渲染 ----------------
+
     private void loadFromTree() {
         Model.Node t = rule.tree;
         if (t != null && "if".equals(t.type)) {
@@ -112,38 +125,56 @@ public class EditRuleActivity extends AppCompatActivity {
         tvName.setText(rule.name == null || rule.name.isEmpty() ? "（未命名）" : rule.name);
         tvTrigger.setText(rule.trigger.describe());
         tvCond.setText(cond.describe());
-        renderRows(thenContainer, thenList);
-        renderRows(elseContainer, elseList);
+        renderRows(thenContainer, thenList, 0);
+        renderRows(elseContainer, elseList, 0);
     }
 
-    private void renderRows(LinearLayout container, final List<Model.Node> list) {
+    /** 递归渲染一组节点。if 节点会把它的两个分支也画出来，缩进一层。 */
+    private void renderRows(LinearLayout container, final List<Model.Node> list, final int depth) {
         container.removeAllViews();
         if (list.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("（空，什么也不做）");
+            empty.setText(depth == 0 ? "（空，什么也不做）" : "（空）");
             empty.setTextSize(13);
-            empty.setPadding(8, 16, 8, 16);
+            empty.setPadding(dp(8 + depth * 12), dp(8), 0, dp(8));
             container.addView(empty);
             return;
         }
+
         for (int i = 0; i < list.size(); i++) {
+            final Model.Node node = list.get(i);
             final int index = i;
+
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(8, 12, 8, 12);
+            row.setPadding(dp(8 + depth * 12), dp(10), 0, dp(10));
 
             TextView text = new TextView(this);
-            text.setText((i + 1) + ". " + list.get(i).describe());
+            String prefix = (i + 1) + ". ";
+            text.setText(prefix + node.describe());
             text.setTextSize(15);
             text.setLayoutParams(new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(text);
 
+            if ("if".equals(node.type)) {
+                TextView edit = new TextView(this);
+                edit.setText("改条件");
+                edit.setTextSize(13);
+                edit.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
+                edit.setPadding(dp(10), dp(6), dp(6), dp(6));
+                edit.setOnClickListener(v -> {
+                    condTarget = c -> node.condition = c;
+                    pickCondition();
+                });
+                row.addView(edit);
+            }
+
             TextView del = new TextView(this);
             del.setText("删除");
             del.setTextSize(13);
-            del.setPadding(16, 8, 8, 8);
+            del.setPadding(dp(10), dp(6), dp(6), dp(6));
             del.setOnClickListener(v -> {
                 list.remove(index);
                 render();
@@ -151,7 +182,72 @@ public class EditRuleActivity extends AppCompatActivity {
             row.addView(del);
 
             container.addView(row);
+
+            // 嵌套分支：把两边的列表继续画出来，并各带一个添加按钮
+            if ("if".equals(node.type)) {
+                if (node.condition == null) node.condition = always();
+
+                TextView thenLabel = new TextView(this);
+                thenLabel.setText("成立时");
+                thenLabel.setTextSize(12);
+                thenLabel.setPadding(dp(20 + depth * 12), dp(4), 0, dp(2));
+                container.addView(thenLabel);
+                container.addView(branchBox(node.then, depth + 1));
+
+                TextView elseLabel = new TextView(this);
+                elseLabel.setText("不成立时");
+                elseLabel.setTextSize(12);
+                elseLabel.setPadding(dp(20 + depth * 12), dp(4), 0, dp(2));
+                container.addView(elseLabel);
+                container.addView(branchBox(node.otherwise, depth + 1));
+            }
         }
+    }
+
+    /** 一个分支 = 子列表渲染 + 一行「+」按钮 */
+    private LinearLayout branchBox(final List<Model.Node> list, final int depth) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        box.addView(rows);
+        renderRows(rows, list, depth);
+
+        TextView add = new TextView(this);
+        add.setText("＋ 添加");
+        add.setTextSize(13);
+        add.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
+        add.setPadding(dp(8 + depth * 12), dp(6), 0, dp(10));
+        add.setOnClickListener(v -> addChooser(list, "这一层"));
+        box.addView(add);
+
+        return box;
+    }
+
+    /** 加东西：动作还是再嵌一层分支 */
+    private void addChooser(final List<Model.Node> list, String where) {
+        final String[] items = {"动作", "条件分支（再加一层如果）"};
+        new AlertDialog.Builder(this)
+                .setTitle("往「" + where + "」里加")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) {
+                        pickAction(list);
+                    } else {
+                        Model.Node branch = new Model.Node();
+                        branch.type = "if";
+                        branch.condition = always();
+                        list.add(branch);
+                        render();
+                        Toast.makeText(this, "已加一层分支，点「改条件」设置判断", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private int dp(int v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
     }
 
     // ---------------- 名称 ----------------
@@ -238,33 +334,20 @@ public class EditRuleActivity extends AppCompatActivity {
                 .setItems(labels, (d, which) -> {
                     switch (which) {
                         case 0:
-                            cond = always();
-                            render();
+                            applyCond(always());
                             break;
                         case 1:
-                            cond = cond("wifi_connected");
-                            try {
-                                cond.params.put("matchAny", true);
-                            } catch (Exception ignored) {
-                            }
-                            askNegate();
+                            applyCond(cond("wifi_connected", "matchAny", true));
                             break;
                         case 2:
                             pickSsid();
                             break;
                         case 3:
-                            cond = cond("charging");
-                            askNegate();
+                            applyCond(cond("charging"));
                             break;
                         case 4:
-                            askNumber("电量低于多少（%）", 20,
-                                    v -> {
-                                        cond = cond("battery_below");
-                                        try {
-                                            cond.params.put("pct", v);
-                                        } catch (Exception ignored) {
-                                        }
-                                    }, true);
+                            askNumber("电量低于多少（%）", 20, v ->
+                                    applyCond(cond("battery_below", "pct", v)), true);
                             break;
                         case 5:
                             askTimeRange();
@@ -283,13 +366,28 @@ public class EditRuleActivity extends AppCompatActivity {
         return c;
     }
 
-    private void askNegate() {
-        final Model.Cond target = cond;
+    private Model.Cond cond(String type, String key, Object value) {
+        Model.Cond c = cond(type);
+        try {
+            c.params.put(key, value);
+        } catch (Exception ignored) {
+        }
+        return c;
+    }
+
+    private void applyCond(Model.Cond c) {
+        if (condTarget == null) condTarget = x -> cond = x;
+        condTarget.set(c);
+        render();
+        askNegate(c);
+    }
+
+    private void askNegate(final Model.Cond target) {
         new AlertDialog.Builder(this)
                 .setTitle("要取反吗")
-                .setMessage("取反后表示「不满足：" + target.describe() + "」")
+                .setMessage("取反后表示「" + target.describe() + "」不成立时才走这一边。")
                 .setPositiveButton("取反", (d, w) -> {
-                    target.negate = true;
+                    target.negate = !target.negate;
                     render();
                 })
                 .setNegativeButton("不取反", (d, w) -> render())
@@ -374,19 +472,19 @@ public class EditRuleActivity extends AppCompatActivity {
     }
 
     private void applySsid(String ssid) {
-        cond = cond("wifi_connected");
+        Model.Cond c = cond("wifi_connected");
         try {
-            cond.params.put("ssid", ssid);
-            cond.params.put("matchAny", false);
+            c.params.put("ssid", ssid);
+            c.params.put("matchAny", false);
         } catch (Exception ignored) {
         }
-        askNegate();
+        applyCond(c);
     }
 
     private void askTimeRange() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(48, 24, 48, 0);
+        box.setPadding(dp(20), dp(10), dp(20), 0);
 
         EditText start = new EditText(this);
         start.setHint("开始，例如 22:00");
@@ -401,13 +499,13 @@ public class EditRuleActivity extends AppCompatActivity {
                 .setTitle("时间段")
                 .setView(box)
                 .setPositiveButton("确定", (d, w) -> {
-                    cond = cond("time_between");
+                    Model.Cond c = cond("time_between");
                     try {
-                        cond.params.put("start", start.getText().toString().trim());
-                        cond.params.put("end", end.getText().toString().trim());
+                        c.params.put("start", start.getText().toString().trim());
+                        c.params.put("end", end.getText().toString().trim());
                     } catch (Exception ignored) {
                     }
-                    askNegate();
+                    applyCond(c);
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -432,7 +530,6 @@ public class EditRuleActivity extends AppCompatActivity {
                         v = def;
                     }
                     cb.on(v);
-                    if (thenNegate) askNegate();
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -441,7 +538,10 @@ public class EditRuleActivity extends AppCompatActivity {
     // ---------------- 动作 ----------------
 
     private void pickAction(final List<Model.Node> target) {
-        final String[] labels = {"铃声：静音", "铃声：振动", "铃声：正常", "媒体音量", "打开应用", "发通知"};
+        final String[] labels = {
+                "铃声：静音", "铃声：振动", "铃声：正常",
+                "媒体音量", "打开应用", "发通知", "等待一会儿"
+        };
         new AlertDialog.Builder(this)
                 .setTitle("添加动作")
                 .setItems(labels, (d, which) -> {
@@ -477,6 +577,19 @@ public class EditRuleActivity extends AppCompatActivity {
                         case 5:
                             askNotify(target);
                             break;
+                        case 6:
+                            askNumber("等待多少秒", 5, v -> {
+                                Model.Node n = new Model.Node();
+                                n.type = "action";
+                                n.action = "delay";
+                                try {
+                                    n.params.put("ms", Math.max(1, v) * 1000);
+                                } catch (Exception ignored) {
+                                }
+                                target.add(n);
+                                render();
+                            }, false);
+                            break;
                         default:
                             break;
                     }
@@ -498,7 +611,7 @@ public class EditRuleActivity extends AppCompatActivity {
     private void askNotify(final List<Model.Node> target) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(48, 24, 48, 0);
+        box.setPadding(dp(20), dp(10), dp(20), 0);
         final EditText title = new EditText(this);
         title.setHint("标题");
         title.setText("规则已执行");

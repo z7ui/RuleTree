@@ -211,7 +211,12 @@ public class Model {
                 return describeAction(action, params);
             }
             if ("if".equals(type)) {
-                return "如果" + (condition == null ? "?" : condition.describe());
+                String c = condition == null ? "?" : condition.describe();
+                String a = then.isEmpty() ? "什么也不做"
+                        : then.get(0).describe() + (then.size() > 1 ? "等 " + then.size() + " 步" : "");
+                String b = otherwise.isEmpty() ? "什么也不做"
+                        : otherwise.get(0).describe() + (otherwise.size() > 1 ? "等 " + otherwise.size() + " 步" : "");
+                return "如果" + c + "，则" + a + "，否则" + b;
             }
             return "按顺序执行 " + children.size() + " 步";
         }
@@ -229,6 +234,8 @@ public class Model {
                     return "打开 " + p.optString("label", p.optString("pkg", "?"));
                 case "notify":
                     return "发通知：" + p.optString("title", "提示");
+                case "delay":
+                    return "等待 " + Math.round(p.optLong("ms", 1000) / 1000.0) + " 秒";
                 default:
                     return "未知动作 " + action;
             }

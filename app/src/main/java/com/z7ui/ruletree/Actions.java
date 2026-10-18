@@ -28,6 +28,12 @@ public class Actions {
                 case "notify":
                     notify(c, params.optString("title", "规则树"), params.optString("text", ""));
                     return true;
+                case "delay": {
+                    long ms = Math.max(0, Math.min(30000, params.optLong("ms", 1000)));
+                    Logx.i(c, "等待 " + ms + "ms");
+                    Thread.sleep(ms);
+                    return true;
+                }
                 default:
                     Logx.i(c, "未知动作，跳过: " + action);
                     return false;

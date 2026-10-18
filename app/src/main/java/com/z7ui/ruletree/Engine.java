@@ -3,6 +3,8 @@ package com.z7ui.ruletree;
 import android.content.Context;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 引擎：触发器命中 → 跑对应规则的树。
@@ -10,8 +12,15 @@ import java.util.List;
  */
 public class Engine {
 
+    /** 动作里有 sleep（延迟），统一丢到单线程队列里跑，别占主线程。 */
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+
     /** 触发器入口。watch 是本次事件的具体值：connected / disconnected。 */
-    public static void fire(Context c, String triggerType, String watch) {
+    public static void fire(final Context c, final String triggerType, final String watch) {
+        WORKER.execute(() -> fireNow(c.getApplicationContext(), triggerType, watch));
+    }
+
+    private static void fireNow(Context c, String triggerType, String watch) {
         Logx.i(c, "触发器 " + triggerType + "（" + watch + "）");
         List<Model.Rule> rules = RuleStore.load(c);
         int hit = 0;

@@ -540,7 +540,7 @@ public class EditRuleActivity extends AppCompatActivity {
     private void pickAction(final List<Model.Node> target) {
         final String[] labels = {
                 "铃声：静音", "铃声：振动", "铃声：正常",
-                "媒体音量", "打开应用", "发通知", "等待一会儿"
+                "媒体音量", "打开应用", "发通知", "等待一会儿", "执行前确认"
         };
         new AlertDialog.Builder(this)
                 .setTitle("添加动作")
@@ -577,6 +577,9 @@ public class EditRuleActivity extends AppCompatActivity {
                         case 5:
                             askNotify(target);
                             break;
+                        case 7:
+                            askConfirm(target);
+                            break;
                         case 6:
                             askNumber("等待多少秒", 5, v -> {
                                 Model.Node n = new Model.Node();
@@ -606,6 +609,42 @@ public class EditRuleActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         return n;
+    }
+
+    /** 执行前确认：发一条带按钮的通知，最多等 N 秒。 */
+    private void askConfirm(final List<Model.Node> target) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(10), dp(20), 0);
+
+        final EditText text = new EditText(this);
+        text.setHint("通知上显示的问题");
+        text.setText("继续执行后面的动作？");
+        final EditText sec = new EditText(this);
+        sec.setHint("最多等几秒");
+        sec.setInputType(InputType.TYPE_CLASS_NUMBER);
+        sec.setText("15");
+        box.addView(text);
+        box.addView(sec);
+
+        new AlertDialog.Builder(this)
+                .setTitle("执行前确认")
+                .setMessage("到这一步会发通知，你点「执行」才继续；超时或点「算了」就取消这一支剩下的动作。")
+                .setView(box)
+                .setPositiveButton("确定", (d, w) -> {
+                    Model.Node n = new Model.Node();
+                    n.type = "action";
+                    n.action = "confirm";
+                    try {
+                        n.params.put("text", text.getText().toString());
+                        n.params.put("sec", Math.max(3, Integer.parseInt(sec.getText().toString().trim())));
+                    } catch (Exception ignored) {
+                    }
+                    target.add(n);
+                    render();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void askNotify(final List<Model.Node> target) {

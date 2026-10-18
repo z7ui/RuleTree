@@ -236,6 +236,9 @@ public class Model {
                     return "发通知：" + p.optString("title", "提示");
                 case "delay":
                     return "等待 " + Math.round(p.optLong("ms", 1000) / 1000.0) + " 秒";
+                case "confirm":
+                    return "执行前确认：" + p.optString("text", "继续？")
+                            + "（" + p.optInt("sec", 15) + " 秒内）";
                 default:
                     return "未知动作 " + action;
             }

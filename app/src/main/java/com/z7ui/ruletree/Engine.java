@@ -9,11 +9,18 @@ import java.util.concurrent.Executors;
 /**
  * 引擎：触发器命中 → 跑对应规则的树。
  * 树的递归结构全在这里，节点类型只有三种：action / if / seq。
+ *
+ * 动作里有 sleep（等待）和 latch（二次确认），所有规则都丢到单线程队列里跑，
+ * 一个慢任务不会拖住主线程，也不会和另一个规则的执行混在一起。
  */
 public class Engine {
 
-    /** 动作里有 sleep（延迟），统一丢到单线程队列里跑，别占主线程。 */
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+
+    /** 一次执行的状态。目前只有一个标记：这一支是否被取消。 */
+    private static class Ctx {
+        boolean aborted;
+    }
 
     /** 触发器入口。watch 是本次事件的具体值：connected / disconnected。 */
     public static void fire(final Context c, final String triggerType, final String watch) {
@@ -40,33 +47,51 @@ public class Engine {
     public static void run(Context c, Model.Rule r) {
         Logx.i(c, "── 开始执行「" + r.name + "」");
         long t = System.currentTimeMillis();
-        runNode(c, r.tree);
-        Logx.i(c, "── 「" + r.name + "」完成，耗时 " + (System.currentTimeMillis() - t) + "ms");
+        Ctx ctx = new Ctx();
+        runNode(c, r.tree, ctx);
+        Logx.i(c, "── 「" + r.name + "」" + (ctx.aborted ? "被取消" : "完成")
+                + "，耗时 " + (System.currentTimeMillis() - t) + "ms");
     }
 
-    private static void runNode(Context c, Model.Node n) {
-        if (n == null) return;
+    private static void runNode(Context c, Model.Node n, Ctx ctx) {
+        if (n == null || ctx.aborted) return;
         switch (n.type) {
             case "action":
-                boolean ok = Actions.run(c, n.action, n.params);
-                Logx.i(c, (ok ? "✓ " : "✗ ") + Model.Node.describeAction(n.action, n.params));
+                handleAction(c, n, ctx);
                 break;
             case "if":
                 boolean branch = Conditions.eval(c, n.condition);
                 List<Model.Node> list = branch ? n.then : n.otherwise;
                 Logx.i(c, "走 " + (branch ? "then（" : "else（") + list.size() + " 步）");
-                runNodes(c, list);
+                runNodes(c, list, ctx);
                 break;
             case "seq":
-                runNodes(c, n.children);
+                runNodes(c, n.children, ctx);
                 break;
             default:
                 Logx.i(c, "未知节点类型，跳过: " + n.type);
         }
     }
 
-    private static void runNodes(Context c, List<Model.Node> list) {
+    private static void handleAction(Context c, Model.Node n, Ctx ctx) {
+        // 二次确认不算普通动作：它要把执行停住，等到用户点或者超时
+        if ("confirm".equals(n.action)) {
+            String text = n.params.optString("text", "继续执行后面的动作？");
+            int sec = n.params.optInt("sec", 15);
+            boolean ok = ConfirmGate.ask(c, text, sec);
+            Logx.i(c, (ok ? "✓ 确认通过" : "✗ 未确认，取消剩余动作") + "：" + text);
+            if (!ok) ctx.aborted = true;
+            return;
+        }
+        boolean ok = Actions.run(c, n.action, n.params);
+        Logx.i(c, (ok ? "✓ " : "✗ ") + Model.Node.describeAction(n.action, n.params));
+    }
+
+    private static void runNodes(Context c, List<Model.Node> list, Ctx ctx) {
         if (list == null) return;
-        for (Model.Node n : list) runNode(c, n);
+        for (Model.Node n : list) {
+            if (ctx.aborted) return;
+            runNode(c, n, ctx);
+        }
     }
 }

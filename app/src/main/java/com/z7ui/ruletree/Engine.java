@@ -3,6 +3,8 @@ package com.z7ui.ruletree;
 import android.content.Context;
 
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -15,7 +17,11 @@ import java.util.concurrent.Executors;
  */
 public class Engine {
 
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+    /** 线程池而不是单线程：一条规则卡在二次确认里，不该把别的规则一起堵住。 */
+    private static final ExecutorService WORKER = Executors.newCachedThreadPool();
+
+    /** 正在跑的规则 id。二次确认可能停十几秒，期间同一个规则又被触发就别再排一份。 */
+    private static final Set<String> RUNNING = ConcurrentHashMap.newKeySet();
 
     /** 一次执行的状态。目前只有一个标记：这一支是否被取消。 */
     private static class Ctx {
@@ -45,12 +51,20 @@ public class Engine {
 
     /** 手动跑某一条规则，比如编辑页的「测试运行」。 */
     public static void run(Context c, Model.Rule r) {
-        Logx.i(c, "── 开始执行「" + r.name + "」");
-        long t = System.currentTimeMillis();
-        Ctx ctx = new Ctx();
-        runNode(c, r.tree, ctx);
-        Logx.i(c, "── 「" + r.name + "」" + (ctx.aborted ? "被取消" : "完成")
-                + "，耗时 " + (System.currentTimeMillis() - t) + "ms");
+        if (!RUNNING.add(r.id)) {
+            Logx.i(c, "「" + r.name + "」还在执行，这次触发跳过");
+            return;
+        }
+        try {
+            Logx.i(c, "── 开始执行「" + r.name + "」");
+            long t = System.currentTimeMillis();
+            Ctx ctx = new Ctx();
+            runNode(c, r.tree, ctx);
+            Logx.i(c, "── 「" + r.name + "」" + (ctx.aborted ? "被取消" : "完成")
+                    + "，耗时 " + (System.currentTimeMillis() - t) + "ms");
+        } finally {
+            RUNNING.remove(r.id);
+        }
     }
 
     private static void runNode(Context c, Model.Node n, Ctx ctx) {

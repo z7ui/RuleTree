@@ -43,6 +43,7 @@ public class ConfirmGate {
         String token = UUID.randomUUID().toString();
         CountDownLatch latch = new CountDownLatch(1);
         WAITERS.put(token, latch);
+        Logx.i(c, "等待确认，token=" + token + "，最多 " + timeoutSec + " 秒");
         post(c, nm, token, text);
 
         boolean resolved = false;

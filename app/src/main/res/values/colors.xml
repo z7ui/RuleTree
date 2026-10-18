@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_bg">#1A3E6E</color>
+    <color name="cond_yes">#22A06B</color>
+    <color name="cond_no">#D9822B</color>
+    <color name="perm_ok">#22A06B</color>
+    <color name="perm_missing">#D9822B</color>
+    <color name="perm_unknown">#8C8C8C</color>
+</resources>

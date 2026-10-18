@@ -2,6 +2,8 @@ package com.z7ui.ruletree;
 
 import android.content.Context;
 
+import org.json.JSONObject;
+
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,6 +33,26 @@ public class Engine {
     /** 触发器入口。watch 是本次事件的具体值：connected / disconnected。 */
     public static void fire(final Context c, final String triggerType, final String watch) {
         WORKER.execute(() -> fireNow(c.getApplicationContext(), triggerType, watch));
+    }
+
+    /** 通知触发：参数里可以限定应用包名和关键词，空表示不限。 */
+    public static void fireNotification(final Context c, final String pkg,
+                                        final String title, final String text) {
+        final Context app = c.getApplicationContext();
+        WORKER.execute(() -> {
+            Logx.i(app, "收到通知 [" + pkg + "] " + title);
+            String blob = (title == null ? "" : title) + " " + (text == null ? "" : text);
+            for (Model.Rule r : RuleStore.load(app)) {
+                if (!r.enabled || !"notification".equals(r.trigger.type)) continue;
+                JSONObject p = r.trigger.params;
+                String wantPkg = p.optString("pkg", "");
+                if (!wantPkg.isEmpty() && !wantPkg.equals(pkg)) continue;
+                String kw = p.optString("keyword", "");
+                if (!kw.isEmpty() && !blob.contains(kw)) continue;
+                Logx.i(app, "规则命中：" + r.name);
+                run(app, r);
+            }
+        });
     }
 
     private static void fireNow(Context c, String triggerType, String watch) {

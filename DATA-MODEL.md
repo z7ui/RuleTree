@@ -46,6 +46,7 @@ v1 支持的触发器：
 | :--- | :--- | :--- |
 | `wifi_state` | `watch`: `connected` / `disconnected` / `any` | Wi-Fi 连上或断开时触发 |
 | `power_state` | `watch`: `connected` / `disconnected` / `any` | 插上或拔掉电源时触发 |
+| `notification` | `pkg`（空为任意）、`label`（显示用）、`keyword`（空为不限） | 收到通知时触发，需要「通知使用权」 |
 | `manual` | 无 | 只能手动运行，用来测试 |
 
 触发器只负责「什么时候跑」，不做判断。判断是树里的事。这个分离是故意的：

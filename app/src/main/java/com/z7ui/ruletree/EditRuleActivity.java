@@ -274,6 +274,7 @@ public class EditRuleActivity extends AppCompatActivity {
         final String[] labels = {
                 "Wi-Fi 连上时", "Wi-Fi 断开时", "Wi-Fi 状态变化时",
                 "插上电源时", "拔掉电源时", "电源状态变化时",
+                "收到通知时",
                 "手动运行"
         };
         new AlertDialog.Builder(this)
@@ -306,6 +307,9 @@ public class EditRuleActivity extends AppCompatActivity {
                                 t.type = "power_state";
                                 t.params.put("watch", "any");
                                 break;
+                            case 6:
+                                pickNotificationTrigger();
+                                return;
                             default:
                                 t.type = "manual";
                                 break;
@@ -315,6 +319,58 @@ public class EditRuleActivity extends AppCompatActivity {
                     rule.trigger = t;
                     render();
                 })
+                .show();
+    }
+
+    /** 通知触发：先选应用（可以任意），再填关键词（可以空）。 */
+    private void pickNotificationTrigger() {
+        PackageManager pm = getPackageManager();
+        Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> ris = pm.queryIntentActivities(main, 0);
+
+        final List<String> labels = new ArrayList<>();
+        final List<String> pkgs = new ArrayList<>();
+        labels.add("任意应用");
+        pkgs.add("");
+        for (ResolveInfo ri : ris) {
+            String p = ri.activityInfo.packageName;
+            if (p.equals(getPackageName()) || pkgs.contains(p)) continue;
+            labels.add(ri.loadLabel(pm).toString());
+            pkgs.add(p);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("监听哪个应用的通知")
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    final String pkg = pkgs.get(which);
+                    final String label = which == 0 ? "" : labels.get(which);
+                    askKeyword(pkg, label);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void askKeyword(final String pkg, final String label) {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_TEXT);
+        et.setHint("内容包含这些字才触发，可留空");
+        new AlertDialog.Builder(this)
+                .setTitle("关键词（可选）")
+                .setMessage("留空表示只要收到通知就触发。")
+                .setView(et)
+                .setPositiveButton("确定", (d, w) -> {
+                    Model.Trigger t = new Model.Trigger();
+                    t.type = "notification";
+                    try {
+                        t.params.put("pkg", pkg);
+                        t.params.put("label", label);
+                        t.params.put("keyword", et.getText().toString().trim());
+                    } catch (Exception ignored) {
+                    }
+                    rule.trigger = t;
+                    render();
+                })
+                .setNegativeButton("取消", null)
                 .show();
     }
 

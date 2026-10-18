@@ -89,6 +89,13 @@ public class Model {
                             : "disconnected".equals(w) ? "拔掉电源时" : "电源状态变化时";
                     return v;
                 }
+                case "notification": {
+                    String label = params.optString("label", "");
+                    String kw = params.optString("keyword", "");
+                    String v = label.isEmpty() ? "收到任意通知时" : "收到「" + label + "」的通知时";
+                    if (!kw.isEmpty()) v += "，内容含「" + kw + "」";
+                    return v;
+                }
                 default:
                     return "手动运行";
             }

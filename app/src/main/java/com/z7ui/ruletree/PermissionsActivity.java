@@ -16,6 +16,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -71,6 +72,11 @@ public class PermissionsActivity extends AppCompatActivity {
 
         addRow("通知", "发通知这个动作要用，前台服务的常驻提示也走这里。\nAndroid 13 以上需要单独授权。",
                 notif, v -> requestNotif());
+
+        boolean listener = NotificationManagerCompat.getEnabledListenerPackages(this)
+                .contains(getPackageName());
+        addRow("通知使用权", "用「收到通知」触发规则时要开。不开的话这类触发器永远不响，\n别的功能不受影响，所以没算进上面的统计。",
+                listener, v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
 
         addRow("勿扰访问", "必须。改铃声模式和媒体音量都要它，没有的话动作会被系统静默忽略。",
                 dnd, v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));

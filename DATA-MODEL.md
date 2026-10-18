@@ -79,11 +79,22 @@ v1 支持的触发器：
 
 ### Condition
 
+条件有两种形态：叶子，和把叶子连起来的组。
+
 ```json
+// 叶子
 { "type": "wifi_connected", "params": { "ssid": "Home-5G", "matchAny": false }, "negate": false }
+
+// 组：all = 并且，any = 或者
+{
+  "type": "group",
+  "op": "all",
+  "negate": false,
+  "children": [ Condition, Condition, ... ]
+}
 ```
 
-v1 支持的条件：
+v1 支持的叶子条件：
 
 | type | params | 说明 |
 | :--- | :--- | :--- |
@@ -93,6 +104,17 @@ v1 支持的条件：
 | `time_between` | `start` / `end`（"HH:mm"，允许跨零点） | 当前时间在区间内 |
 
 `negate` 是所有条件都有的开关，等价于「不满足」。比造一堆反向类型省事。
+组上也能加 `negate`，意思是「这一组整体不成立」。
+
+`children` 的元素同样可以是叶子或组，所以条件也是一棵树，深度不受限。
+求值规则：
+
+- `all`：从左到右算，遇到第一个 false 立刻返回 false
+- `any`：从左到右算，遇到第一个 true 立刻返回 true
+- 空组按成立处理（一条规则只写了动作没写条件，本来就该跑）
+
+界面上目前只展开一层组里的内容，再深的组用「点进去」的方式逐层编辑，
+但存储和求值都是递归的，手写 JSON 放到多少层都能正确执行。
 
 ### Action（动作）
 

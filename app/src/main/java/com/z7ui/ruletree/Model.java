@@ -109,24 +109,56 @@ public class Model {
         public JSONObject params = new JSONObject();
         public boolean negate = false;
 
+        /** 仅 type=group 时有效：all = 并且，any = 或者 */
+        public String op = "all";
+        /** 仅 type=group 时有效：组内的条件，元素可以是叶子，也可以是另一个组 */
+        public List<Cond> children = new ArrayList<>();
+
+        public boolean isGroup() {
+            return "group".equals(type);
+        }
+
         public static Cond fromJson(JSONObject o) throws JSONException {
             Cond c = new Cond();
             if (o == null) return c;
             c.type = o.optString("type", "always");
             c.params = o.optJSONObject("params") != null ? o.optJSONObject("params") : new JSONObject();
             c.negate = o.optBoolean("negate", false);
+            c.op = o.optString("op", "all");
+            JSONArray kids = o.optJSONArray("children");
+            if (kids != null) {
+                for (int i = 0; i < kids.length(); i++) {
+                    c.children.add(Cond.fromJson(kids.optJSONObject(i)));
+                }
+            }
             return c;
         }
 
         public JSONObject toJson() throws JSONException {
             JSONObject o = new JSONObject();
             o.put("type", type);
-            o.put("params", params);
             o.put("negate", negate);
+            if (isGroup()) {
+                o.put("op", op);
+                JSONArray a = new JSONArray();
+                for (Cond c : children) a.put(c.toJson());
+                o.put("children", a);
+            } else {
+                o.put("params", params);
+            }
             return o;
         }
 
         public String describe() {
+            return describe(0);
+        }
+
+        /** depth 只是防御：数据万一被写坏了绕成环，也不至于把界面撑爆。 */
+        private String describe(int depth) {
+            if (isGroup()) {
+                String inner = groupDescribe(depth);
+                return negate ? "不满足（" + inner + "）" : inner;
+            }
             String base;
             switch (type) {
                 case "wifi_connected": {
@@ -151,6 +183,24 @@ public class Model {
                     base = "总是成立";
             }
             return negate ? "不满足「" + base + "」" : base;
+        }
+
+        private String groupDescribe(int depth) {
+            if (children.isEmpty()) return "组合条件（还空着）";
+            if (depth > 6) return "…";
+            boolean any = "any".equals(op);
+            StringBuilder sb = new StringBuilder(any ? "任一满足：" : "全部满足：");
+            int shown = 0;
+            for (Cond c : children) {
+                if (shown >= 2) break;
+                if (shown > 0) sb.append("、");
+                sb.append(c.describe(depth + 1));
+                shown++;
+            }
+            if (children.size() > 2) sb.append(" 等 ").append(children.size()).append(" 项");
+            String s = sb.toString();
+            // 卡片上的摘要，太长就截断，完整内容在编辑页看
+            return s.length() > 60 ? s.substring(0, 58) + "…" : s;
         }
     }
 

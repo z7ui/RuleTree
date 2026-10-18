@@ -12,10 +12,21 @@ import java.util.Calendar;
 /** 条件求值。返回前统一处理 negate，各类型只算原始真假。 */
 public class Conditions {
 
+    private static final int MAX_DEPTH = 8;
+
     public static boolean eval(Context c, Model.Cond cond) {
+        return eval(c, cond, 0);
+    }
+
+    private static boolean eval(Context c, Model.Cond cond, int depth) {
+        if (cond == null) return true;
+        if (depth > MAX_DEPTH) {
+            Logx.i(c, "条件嵌套超过 " + MAX_DEPTH + " 层，按不成立处理");
+            return false;
+        }
         boolean v;
         try {
-            v = raw(c, cond);
+            v = raw(c, cond, depth);
         } catch (Throwable t) {
             Logx.i(c, "条件求值异常 " + cond.type + ": " + t);
             v = false;
@@ -25,7 +36,10 @@ public class Conditions {
         return r;
     }
 
-    private static boolean raw(Context c, Model.Cond cond) {
+    private static boolean raw(Context c, Model.Cond cond, int depth) {
+        if (cond.isGroup()) {
+            return group(c, cond, depth);
+        }
         switch (cond.type) {
             case "wifi_connected":
                 return wifiConnected(c, cond.params);
@@ -39,6 +53,21 @@ public class Conditions {
             default:
                 return true;
         }
+    }
+
+    /**
+     * 条件组。all 遇到第一个 false 就停，any 遇到第一个 true 就停。
+     * 空组按成立处理：一条规则只写了动作、没写条件，本来就该跑。
+     */
+    private static boolean group(Context c, Model.Cond g, int depth) {
+        if (g.children == null || g.children.isEmpty()) return true;
+        boolean all = !"any".equals(g.op);
+        for (Model.Cond child : g.children) {
+            boolean v = eval(c, child, depth + 1);
+            if (all && !v) return false;
+            if (!all && v) return true;
+        }
+        return all;
     }
 
     private static boolean wifiConnected(Context c, org.json.JSONObject p) {

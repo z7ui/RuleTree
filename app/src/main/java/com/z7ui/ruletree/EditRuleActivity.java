@@ -43,12 +43,17 @@ public class EditRuleActivity extends AppCompatActivity {
     private final List<Model.Node> thenList = new ArrayList<>();
     private final List<Model.Node> elseList = new ArrayList<>();
 
-    /** 当前正在编辑的条件归属，点选条件时用。 */
-    private interface CondTarget {
-        void set(Model.Cond c);
+    /** 当前正在编辑的条件归属。get() 用来判断「这一格现在是不是组合条件」，可为 null。 */
+    private abstract class CondTarget {
+        abstract Model.Cond get();
+
+        abstract void set(Model.Cond c);
     }
 
     private CondTarget condTarget;
+
+    /** 打开着的组合条件弹窗，主界面重绘时一并刷新它们的内容。 */
+    private final List<Runnable> groupRefreshers = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,10 +80,18 @@ public class EditRuleActivity extends AppCompatActivity {
 
         findViewById(R.id.rowName).setOnClickListener(v -> editName());
         findViewById(R.id.rowTrigger).setOnClickListener(v -> pickTrigger());
-        findViewById(R.id.rowCond).setOnClickListener(v -> {
-            condTarget = c -> cond = c;
-            pickCondition();
-        });
+        condTarget = new CondTarget() {
+            @Override
+            Model.Cond get() {
+                return cond;
+            }
+
+            @Override
+            void set(Model.Cond c) {
+                cond = c;
+            }
+        };
+        findViewById(R.id.rowCond).setOnClickListener(v -> openConditionEditor());
         findViewById(R.id.btnAddThen).setOnClickListener(v ->
                 addChooser(thenList, "条件成立时"));
         findViewById(R.id.btnAddElse).setOnClickListener(v ->
@@ -127,6 +140,8 @@ public class EditRuleActivity extends AppCompatActivity {
         tvCond.setText(cond.describe());
         renderRows(thenContainer, thenList, 0);
         renderRows(elseContainer, elseList, 0);
+        // 组合条件的弹窗还开着的话，把里面的行也重画一遍
+        for (Runnable r : new ArrayList<>(groupRefreshers)) r.run();
     }
 
     /** 递归渲染一组节点。if 节点会把它的两个分支也画出来，缩进一层。 */
@@ -165,8 +180,18 @@ public class EditRuleActivity extends AppCompatActivity {
                 edit.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
                 edit.setPadding(dp(10), dp(6), dp(6), dp(6));
                 edit.setOnClickListener(v -> {
-                    condTarget = c -> node.condition = c;
-                    pickCondition();
+                    condTarget = new CondTarget() {
+                        @Override
+                        Model.Cond get() {
+                            return node.condition;
+                        }
+
+                        @Override
+                        void set(Model.Cond c) {
+                            node.condition = c;
+                        }
+                    };
+                    openConditionEditor();
                 });
                 row.addView(edit);
             }
@@ -376,6 +401,171 @@ public class EditRuleActivity extends AppCompatActivity {
 
     // ---------------- 条件 ----------------
 
+    /** 点条件那一行。已经是组合的话先问一句，别让人一点就把整组弄丢。 */
+    private void openConditionEditor() {
+        Model.Cond cur = condTarget == null ? null : condTarget.get();
+        if (cur == null || !cur.isGroup()) {
+            pickCondition();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("判断条件")
+                .setItems(new String[]{"编辑这个组合", "换成单个条件"}, (d, which) -> {
+                    if (which == 0) editGroup(cur, null);
+                    else pickCondition();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 新建一个空组合。点「完成」才挂上去，取消就丢掉。 */
+    private void startGroup() {
+        // 记住开弹窗时是谁在接这个条件。组里的「添加条件」会改 condTarget，
+        // 不记住的话「完成」时会把新组塞进自己肚子里。
+        final CondTarget attachTo = condTarget;
+        Model.Cond g = new Model.Cond();
+        g.type = "group";
+        g.op = "all";
+        editGroup(g, attachTo);
+    }
+
+    /**
+     * 组合条件编辑器。嵌套靠弹窗叠弹窗：组里点某一条可以就地改，
+     * 点「添加条件」再选「组合」，就会在这上面再叠一层。
+     *
+     * @param attachTo 完成时把这个组挂到哪儿；就地编辑已有组时传 null
+     */
+    private void editGroup(final Model.Cond group, final CondTarget attachTo) {
+        final boolean isNewGroup = group.children.isEmpty();
+
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(4), dp(20), dp(4));
+
+        final Runnable fill = new Runnable() {
+            @Override
+            public void run() {
+                box.removeAllViews();
+
+                TextView mode = new TextView(EditRuleActivity.this);
+                boolean any = "any".equals(group.op);
+                mode.setText(any ? "满足任意一条（或者）　点这里切换"
+                        : "满足全部条件（并且）　点这里切换");
+                mode.setTextSize(15);
+                mode.setTextColor(ContextCompat.getColor(EditRuleActivity.this, R.color.perm_ok));
+                mode.setPadding(0, dp(10), 0, dp(12));
+                mode.setOnClickListener(v -> {
+                    group.op = "any".equals(group.op) ? "all" : "any";
+                    render();
+                });
+                box.addView(mode);
+
+                if (group.children.isEmpty()) {
+                    TextView empty = new TextView(EditRuleActivity.this);
+                    empty.setText("还没有条件，点下面的按钮加一条");
+                    empty.setTextSize(13);
+                    empty.setPadding(0, dp(2), 0, dp(10));
+                    box.addView(empty);
+                }
+
+                for (int i = 0; i < group.children.size(); i++) {
+                    final Model.Cond child = group.children.get(i);
+
+                    LinearLayout row = new LinearLayout(EditRuleActivity.this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(0, dp(6), 0, dp(6));
+
+                    TextView text = new TextView(EditRuleActivity.this);
+                    text.setText((i + 1) + ". " + child.describe());
+                    text.setTextSize(15);
+                    text.setLayoutParams(new LinearLayout.LayoutParams(0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                    text.setOnClickListener(v -> editChild(group, child));
+                    row.addView(text);
+
+                    TextView del = new TextView(EditRuleActivity.this);
+                    del.setText("删除");
+                    del.setTextSize(13);
+                    del.setPadding(dp(10), dp(6), dp(2), dp(6));
+                    del.setOnClickListener(v -> {
+                        group.children.remove(child);
+                        render();
+                    });
+                    row.addView(del);
+
+                    box.addView(row);
+                }
+
+                TextView add = new TextView(EditRuleActivity.this);
+                add.setText("＋ 添加条件");
+                add.setTextSize(14);
+                add.setTextColor(ContextCompat.getColor(EditRuleActivity.this, R.color.perm_ok));
+                add.setPadding(0, dp(10), 0, dp(4));
+                add.setOnClickListener(v -> {
+                    condTarget = new CondTarget() {
+                        @Override
+                        Model.Cond get() {
+                            return null;
+                        }
+
+                        @Override
+                        void set(Model.Cond c) {
+                            group.children.add(c);
+                        }
+                    };
+                    pickCondition();
+                });
+                box.addView(add);
+            }
+        };
+
+        groupRefreshers.add(fill);
+        fill.run();
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(box);
+
+        new AlertDialog.Builder(this)
+                .setTitle("组合条件")
+                .setView(sv)
+                .setPositiveButton("完成", (d, w) -> {
+                    groupRefreshers.remove(fill);
+                    if (group.children.isEmpty()) {
+                        Toast.makeText(this, "至少要有一个条件，这次不算", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (attachTo != null) attachTo.set(group);
+                    render();
+                    // 新建的组才问取反，改已有的组再问一次会让人以为点错了
+                    if (isNewGroup) askNegate(group);
+                })
+                .setNegativeButton("取消", (d, w) -> groupRefreshers.remove(fill))
+                .show();
+    }
+
+    /** 点组合里的某一条：本身是组合就继续往下编，是叶子就重新选一遍。 */
+    private void editChild(final Model.Cond group, final Model.Cond child) {
+        if (child.isGroup()) {
+            editGroup(child, null);
+            return;
+        }
+        condTarget = new CondTarget() {
+            @Override
+            Model.Cond get() {
+                return child;
+            }
+
+            @Override
+            void set(Model.Cond c) {
+                int i = group.children.indexOf(child);
+                if (i >= 0) group.children.set(i, c);
+                else group.children.add(c);
+            }
+        };
+        pickCondition();
+    }
+
     private void pickCondition() {
         final String[] labels = {
                 "总是成立（无条件）",
@@ -383,7 +573,8 @@ public class EditRuleActivity extends AppCompatActivity {
                 "连着指定 Wi-Fi",
                 "正在充电",
                 "电量低于某个百分比",
-                "时间在一个区间内"
+                "时间在一个区间内",
+                "组合条件（并且 / 或者）"
         };
         new AlertDialog.Builder(this)
                 .setTitle("判断条件")
@@ -407,6 +598,9 @@ public class EditRuleActivity extends AppCompatActivity {
                             break;
                         case 5:
                             askTimeRange();
+                            break;
+                        case 6:
+                            startGroup();
                             break;
                         default:
                             break;
@@ -432,10 +626,26 @@ public class EditRuleActivity extends AppCompatActivity {
     }
 
     private void applyCond(Model.Cond c) {
-        if (condTarget == null) condTarget = x -> cond = x;
+        applyCond(c, true);
+    }
+
+    private void applyCond(Model.Cond c, boolean withNegate) {
+        if (condTarget == null) {
+            condTarget = new CondTarget() {
+                @Override
+                Model.Cond get() {
+                    return cond;
+                }
+
+                @Override
+                void set(Model.Cond x) {
+                    cond = x;
+                }
+            };
+        }
         condTarget.set(c);
         render();
-        askNegate(c);
+        if (withNegate) askNegate(c);
     }
 
     private void askNegate(final Model.Cond target) {

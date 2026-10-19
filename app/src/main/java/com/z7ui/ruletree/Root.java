@@ -3,7 +3,6 @@ package com.z7ui.ruletree;
 import android.content.Context;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.InputStreamReader;
 import java.util.concurrent.TimeUnit;
 
@@ -14,11 +13,6 @@ import java.util.concurrent.TimeUnit;
  * 没 root 时这里统一返回失败，动作日志里写清楚，不会静默什么都不做。
  */
 public class Root {
-
-    private static final String[] SU_PATHS = {
-            "/system/bin/su", "/system/xbin/su", "/sbin/su",
-            "/debug_ramdisk/su", "/data/adb/ksu/bin/su", "/data/adb/magisk/su"
-    };
 
     /** 结果：成不成，加上输出，方便写日志。 */
     public static class Result {
@@ -31,22 +25,7 @@ public class Root {
         }
     }
 
-    private static Boolean cached;
-
-    /** 只看文件在不在，够判断状态栏那一行，别在 UI 线程里跑 su。 */
-    public static boolean present() {
-        if (cached != null) return cached;
-        for (String p : SU_PATHS) {
-            if (new File(p).exists()) {
-                cached = true;
-                return true;
-            }
-        }
-        cached = false;
-        return false;
-    }
-
-    /** 真正执行一次 su，确认真能用，结果缓存。 */
+    /** 真正执行一次 su，确认真能用。别用文件存在性判断：KSU 对没授权的应用是直接 EACCES。 */
     public static boolean available(Context c) {
         Result r = run(c, "id");
         return r.ok && r.out.contains("uid=0");

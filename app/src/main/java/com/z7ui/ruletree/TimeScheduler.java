@@ -20,7 +20,11 @@ import java.util.Locale;
  */
 public class TimeScheduler {
 
-    private static final String ACTION = "com.z7ui.ruletree.TIME_FIRE";
+    /** 日常定时到点 */
+    public static final String ACTION_FIRE = "com.z7ui.ruletree.TIME_FIRE";
+    /** 测试模式到点，跑完不重排 */
+    public static final String ACTION_TEST = "com.z7ui.ruletree.TEST_FIRE";
+
     /** 没有精确闹钟权限时的窗口宽度，到点误差最多这么多。 */
     private static final long INEXACT_WINDOW = 10 * 60 * 1000L;
 
@@ -61,6 +65,39 @@ public class TimeScheduler {
         }
     }
 
+    /**
+     * 测试模式：x 秒后跑一次。
+     * 先取消同一条规则上一次没跑的测试，免得连点几下堆出一串。
+     * 没有精确闹钟权限时用 setAndAllowWhileIdle，误差通常只有几秒，比 10 分钟窗口靠谱。
+     */
+    public static void test(Context c, String ruleId, int sec) {
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        PendingIntent pi = pending(c, ruleId, ACTION_TEST, testCode(ruleId));
+        try {
+            am.cancel(pi);
+        } catch (Exception ignored) {
+        }
+        long at = System.currentTimeMillis() + Math.max(1, sec) * 1000L;
+        boolean exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms();
+        try {
+            if (exact) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+            } else {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+            }
+            Logx.i(c, "测试闹钟已排：" + sec + " 秒后" + (exact ? "" : "（无精确闹钟权限）"));
+        } catch (SecurityException e) {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+            Logx.i(c, "精确闹钟被拒，测试改用普通闹钟: " + e);
+        }
+    }
+
+    /** 测试用另一个 requestCode，跟日常定时互不影响。 */
+    private static int testCode(String rid) {
+        return rid.hashCode() ^ 0x5EED;
+    }
+
     private static void schedule(Context c, AlarmManager am, String rid, long at) {
         PendingIntent pi = pending(c, rid);
         boolean exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms();
@@ -78,11 +115,15 @@ public class TimeScheduler {
     }
 
     private static PendingIntent pending(Context c, String rid) {
-        Intent i = new Intent(c, TimeReceiver.class);
-        i.setAction(ACTION);
-        i.putExtra("rid", rid);
         // 每条规则一个 requestCode，规则 id 是 UUID，hash 撞车概率可以忽略
-        return PendingIntent.getBroadcast(c, rid.hashCode(), i,
+        return pending(c, rid, ACTION_FIRE, rid.hashCode());
+    }
+
+    private static PendingIntent pending(Context c, String rid, String action, int code) {
+        Intent i = new Intent(c, TimeReceiver.class);
+        i.setAction(action);
+        i.putExtra("rid", rid);
+        return PendingIntent.getBroadcast(c, code, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 

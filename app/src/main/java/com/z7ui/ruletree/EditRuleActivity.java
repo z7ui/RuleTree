@@ -107,15 +107,8 @@ public class EditRuleActivity extends AppCompatActivity {
                 addChooser(thenList, "条件成立时"));
         findViewById(R.id.btnAddElse).setOnClickListener(v ->
                 addChooser(elseList, "条件不成立时"));
-        findViewById(R.id.btnTest).setOnClickListener(v -> {
-            final Model.Rule probe = build();
-            Toast.makeText(this, "开始执行…", Toast.LENGTH_SHORT).show();
-            new Thread(() -> {
-                Engine.run(getApplicationContext(), probe);
-                runOnUiThread(() -> Toast.makeText(this, "执行完了，主界面菜单能看日志",
-                        Toast.LENGTH_SHORT).show());
-            }).start();
-        });
+        findViewById(R.id.btnTest).setOnClickListener(v ->
+                TestRunner.ask(this, this::build, this::persistForTest));
         findViewById(R.id.btnSave).setOnClickListener(v -> save());
         findViewById(R.id.btnDelete).setVisibility(isNew ? View.GONE : View.VISIBLE);
         findViewById(R.id.btnDelete).setOnClickListener(v -> confirmDelete());
@@ -1372,6 +1365,21 @@ public class EditRuleActivity extends AppCompatActivity {
         Logx.i(this, "已保存规则 " + r.name + " (" + r.id + ")");
         Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
         finish();
+    }
+
+    /**
+     * 延迟测试前的落盘。名字和动作不做强校验：测试就是想随手试一下，
+     * 空名字给个默认名，动作空着测试跑起来什么也不做而已。
+     */
+    private boolean persistForTest(Model.Rule r) {
+        if (thenList.isEmpty() && elseList.isEmpty()) {
+            Toast.makeText(this, "先加一个动作再测", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        RuleStore.upsert(this, r);
+        WatchService.sync(this);
+        Logx.i(this, "测试前已保存规则 " + r.name + " (" + r.id + ")");
+        return true;
     }
 
     private void confirmDelete() {

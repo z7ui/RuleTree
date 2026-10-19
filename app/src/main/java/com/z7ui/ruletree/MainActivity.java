@@ -251,10 +251,8 @@ public class MainActivity extends AppCompatActivity {
                 WatchService.sync(this);
             });
 
-            item.findViewById(R.id.btnRun).setOnClickListener(v -> {
-                Engine.run(this, r);
-                Toast.makeText(this, "已运行，菜单里「查看日志」能看结果", Toast.LENGTH_SHORT).show();
-            });
+            item.findViewById(R.id.btnRun).setOnClickListener(v ->
+                    TestRunner.ask(this, () -> r, x -> true));
             item.findViewById(R.id.btnEdit).setOnClickListener(v -> {
                 Intent i = new Intent(this, EditRuleActivity.class);
                 i.putExtra("rid", r.id);

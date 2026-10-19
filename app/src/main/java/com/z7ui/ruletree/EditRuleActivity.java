@@ -785,9 +785,20 @@ public class EditRuleActivity extends AppCompatActivity {
                 "总是成立（无条件）",
                 "连着 Wi-Fi（任意）",
                 "连着指定 Wi-Fi",
+                "连着蓝牙设备",
                 "正在充电",
                 "电量低于某个百分比",
+                "电量高于某个百分比",
                 "时间在一个区间内",
+                "星期几",
+                "屏幕亮着",
+                "处于锁屏",
+                "免打扰开着",
+                "铃声是静音",
+                "铃声是振动",
+                "铃声正常响",
+                "深色模式开着",
+                "插着有线耳机",
                 "组合条件（并且 / 或者）"
         };
         new AlertDialog.Builder(this)
@@ -804,21 +815,79 @@ public class EditRuleActivity extends AppCompatActivity {
                             pickSsid();
                             break;
                         case 3:
-                            applyCond(cond("charging"));
+                            applyCond(cond("bt_connected"));
                             break;
                         case 4:
+                            applyCond(cond("charging"));
+                            break;
+                        case 5:
                             askNumber("电量低于多少（%）", 20, v ->
                                     applyCond(cond("battery_below", "pct", v)), true);
                             break;
-                        case 5:
+                        case 6:
+                            askNumber("电量高于多少（%）", 80, v ->
+                                    applyCond(cond("battery_above", "pct", v)), true);
+                            break;
+                        case 7:
                             askTimeRange();
                             break;
-                        case 6:
+                        case 8:
+                            askDays();
+                            break;
+                        case 9:
+                            applyCond(cond("screen_on"));
+                            break;
+                        case 10:
+                            applyCond(cond("keyguard_locked"));
+                            break;
+                        case 11:
+                            applyCond(cond("dnd_on"));
+                            break;
+                        case 12:
+                            applyCond(cond("ringer_silent"));
+                            break;
+                        case 13:
+                            applyCond(cond("ringer_vibrate"));
+                            break;
+                        case 14:
+                            applyCond(cond("ringer_normal"));
+                            break;
+                        case 15:
+                            applyCond(cond("dark_mode"));
+                            break;
+                        case 16:
+                            applyCond(cond("headset"));
+                            break;
+                        case 17:
                             startGroup();
                             break;
                         default:
                             break;
                     }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 星期几：多选，周一到周日。 */
+    private void askDays() {
+        final String[] names = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+        final boolean[] picked = new boolean[7];
+        new AlertDialog.Builder(this)
+                .setTitle("哪几天算成立")
+                .setMultiChoiceItems(names, picked, (d, which, checked) -> picked[which] = checked)
+                .setPositiveButton("确定", (d, w) -> {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < 7; i++) {
+                        if (picked[i]) {
+                            if (sb.length() > 0) sb.append(",");
+                            sb.append(i + 1);
+                        }
+                    }
+                    if (sb.length() == 0) {
+                        Toast.makeText(this, "一天都没选，按每天都算", Toast.LENGTH_SHORT).show();
+                    }
+                    applyCond(cond("day_of_week", "days", sb.toString()));
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -1017,67 +1086,137 @@ public class EditRuleActivity extends AppCompatActivity {
 
     // ---------------- 动作 ----------------
 
+    /**
+     * 选动作。动作多了之后一层平铺太长，改成先选分类，再选具体动作。
+     * 分类和动作都来自 Capabilities.ACTIONS，加新动作不用改这里。
+     */
     private void pickAction(final List<Model.Node> target) {
-        final String[] labels = {
-                "铃声：静音", "铃声：振动", "铃声：正常",
-                "媒体音量", "打开应用", "发通知", "等待一会儿", "执行前确认"
-        };
+        final List<String> groups = Capabilities.actionGroups();
         new AlertDialog.Builder(this)
                 .setTitle("添加动作")
-                .setItems(labels, (d, which) -> {
-                    switch (which) {
-                        case 0:
-                            target.add(act("ringer_mode", "mode", "silent"));
-                            render();
-                            break;
-                        case 1:
-                            target.add(act("ringer_mode", "mode", "vibrate"));
-                            render();
-                            break;
-                        case 2:
-                            target.add(act("ringer_mode", "mode", "normal"));
-                            render();
-                            break;
-                        case 3:
-                            askNumber("媒体音量（0-100）", 50, v -> {
-                                Model.Node n = new Model.Node();
-                                n.type = "action";
-                                n.action = "media_volume";
-                                try {
-                                    n.params.put("value", v);
-                                } catch (Exception ignored) {
-                                }
-                                target.add(n);
-                                render();
-                            }, false);
-                            break;
-                        case 4:
-                            pickApp(target);
-                            break;
-                        case 5:
-                            askNotify(target);
-                            break;
-                        case 7:
-                            askConfirm(target);
-                            break;
-                        case 6:
-                            askNumber("等待多少秒", 5, v -> {
-                                Model.Node n = new Model.Node();
-                                n.type = "action";
-                                n.action = "delay";
-                                try {
-                                    n.params.put("ms", Math.max(1, v) * 1000);
-                                } catch (Exception ignored) {
-                                }
-                                target.add(n);
-                                render();
-                            }, false);
-                            break;
-                        default:
-                            break;
-                    }
-                })
+                .setItems(groups.toArray(new String[0]),
+                        (d, which) -> pickActionIn(groups.get(which), target))
+                .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void pickActionIn(String group, final List<Model.Node> target) {
+        final List<Capabilities.Def> defs = Capabilities.actionsIn(group);
+        String[] labels = new String[defs.size()];
+        for (int i = 0; i < defs.size(); i++) labels[i] = defs.get(i).label;
+        new AlertDialog.Builder(this)
+                .setTitle(group)
+                .setItems(labels, (d, which) -> addAction(defs.get(which), target))
+                .setNegativeButton("返回", (d, w) -> pickAction(target))
+                .show();
+    }
+
+    private void addAction(final Capabilities.Def def, final List<Model.Node> target) {
+        switch (def.key) {
+            case "open_app":
+                pickApp(target);
+                return;
+            case "notify":
+                askNotify(target);
+                return;
+            case "confirm":
+                askConfirm(target);
+                return;
+            case "delay":
+                askNumber("等待多少秒", 5, v -> {
+                    Model.Node n = new Model.Node();
+                    n.type = "action";
+                    n.action = "delay";
+                    try {
+                        n.params.put("ms", Math.max(1, v) * 1000);
+                    } catch (Exception ignored) {
+                    }
+                    target.add(n);
+                    render();
+                }, false);
+                return;
+            case "ringer_mode": {
+                final String[] modes = {"静音", "振动", "正常响铃"};
+                final String[] keys = {"silent", "vibrate", "normal"};
+                new AlertDialog.Builder(this)
+                        .setTitle("铃声切到")
+                        .setItems(modes, (d, which) -> {
+                            target.add(act("ringer_mode", "mode", keys[which]));
+                            render();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+                return;
+            }
+            default:
+                break;
+        }
+
+        if (def.args.isEmpty()) {
+            Model.Node n = new Model.Node();
+            n.type = "action";
+            n.action = def.key;
+            n.params = Capabilities.defaults(def);
+            target.add(n);
+            render();
+            return;
+        }
+        askParams(def, target);
+    }
+
+    /** 按 Capabilities 里的参数定义生成输入框，一行一个参数。 */
+    private void askParams(final Capabilities.Def def, final List<Model.Node> target) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+
+        final List<EditText> inputs = new ArrayList<>();
+        for (Capabilities.Arg arg : def.args) {
+            TextView label = new TextView(this);
+            label.setText(arg.label);
+            label.setTextSize(13);
+            label.setPadding(0, dp(6), 0, 0);
+            box.addView(label);
+
+            EditText et = new EditText(this);
+            et.setHint(arg.label);
+            et.setText(arg.def);
+            if (arg.isInt()) et.setInputType(InputType.TYPE_CLASS_NUMBER);
+            box.addView(et);
+            inputs.add(et);
+        }
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle(def.label)
+                .setView(box)
+                .setPositiveButton("确定", (d, w) -> {
+                    Model.Node n = new Model.Node();
+                    n.type = "action";
+                    n.action = def.key;
+                    try {
+                        for (int i = 0; i < def.args.size(); i++) {
+                            Capabilities.Arg arg = def.args.get(i);
+                            String v = inputs.get(i).getText().toString().trim();
+                            if (arg.isInt()) {
+                                int num;
+                                try {
+                                    num = Integer.parseInt(v);
+                                } catch (Exception e) {
+                                    num = 0;
+                                }
+                                n.params.put(arg.key, num);
+                            } else {
+                                n.params.put(arg.key, v);
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                    target.add(n);
+                    render();
+                })
+                .setNegativeButton("取消", null);
+        if (def.hint != null && !def.hint.isEmpty()) b.setMessage(def.hint);
+        b.show();
     }
 
     private Model.Node act(String action, String key, String value) {

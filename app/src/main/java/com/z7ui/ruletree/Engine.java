@@ -145,6 +145,12 @@ public class Engine {
             if (!ok) ctx.aborted = true;
             return;
         }
+        // 主动喊停：这一支后面的动作都不做了
+        if ("stop".equals(n.action)) {
+            Logx.i(c, "■ 到这里停止，这一支剩下的动作都不执行");
+            ctx.aborted = true;
+            return;
+        }
         boolean ok = Actions.run(c, n.action, n.params);
         Logx.i(c, (ok ? "✓ " : "✗ ") + Model.Node.describeAction(n.action, n.params));
     }

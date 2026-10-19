@@ -1,11 +1,18 @@
 package com.z7ui.ruletree;
 
+import android.app.KeyguardManager;
+import android.app.NotificationManager;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.content.res.Configuration;
+import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
+import android.os.PowerManager;
 
 import java.util.Calendar;
 
@@ -47,8 +54,43 @@ public class Conditions {
                 return isCharging(c);
             case "battery_below":
                 return batteryLevel(c) < cond.params.optInt("pct", 20);
+            case "battery_above":
+                return batteryLevel(c) > cond.params.optInt("pct", 80);
             case "time_between":
                 return timeBetween(cond.params);
+            case "day_of_week":
+                return dayOfWeek(cond.params.optString("days", ""));
+            case "screen_on": {
+                PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                return pm != null && pm.isInteractive();
+            }
+            case "keyguard_locked": {
+                KeyguardManager km =
+                        (KeyguardManager) c.getSystemService(Context.KEYGUARD_SERVICE);
+                return km != null && km.isKeyguardLocked();
+            }
+            case "dnd_on": {
+                NotificationManager nm =
+                        (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+                return nm != null
+                        && nm.getCurrentInterruptionFilter()
+                        != NotificationManager.INTERRUPTION_FILTER_ALL;
+            }
+            case "ringer_silent":
+                return ringerMode(c) == AudioManager.RINGER_MODE_SILENT;
+            case "ringer_vibrate":
+                return ringerMode(c) == AudioManager.RINGER_MODE_VIBRATE;
+            case "ringer_normal":
+                return ringerMode(c) == AudioManager.RINGER_MODE_NORMAL;
+            case "dark_mode":
+                return (c.getResources().getConfiguration().uiMode
+                        & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+            case "bt_connected":
+                return btConnected(c);
+            case "headset": {
+                AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+                return am != null && am.isWiredHeadsetOn();
+            }
             case "always":
             default:
                 return true;
@@ -109,6 +151,44 @@ public class Conditions {
         if (start <= end) return cur >= start && cur <= end;
         // 跨零点：22:00-06:00
         return cur >= start || cur <= end;
+    }
+
+    /** days 是 ISO 星期，"1,3,5" 表示周一二三……周一=1，周日=7；空串表示每天都算成立。 */
+    private static boolean dayOfWeek(String days) {
+        if (days == null || days.isEmpty()) return true;
+        int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+        int iso = dow == Calendar.SUNDAY ? 7 : dow - 1;
+        for (String p : days.split(",")) {
+            try {
+                if (Integer.parseInt(p.trim()) == iso) return true;
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
+    private static int ringerMode(Context c) {
+        AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        return am == null ? -1 : am.getRingerMode();
+    }
+
+    /**
+     * 有没有连着蓝牙设备。用 getConnectedDevices，比查广播可靠。
+     * Android 12 起要 BLUETOOTH_CONNECT，没授权会抛异常，按「没连」处理。
+     */
+    private static boolean btConnected(Context c) {
+        try {
+            android.bluetooth.BluetoothManager bm =
+                    (android.bluetooth.BluetoothManager) c.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bm == null) return false;
+            BluetoothAdapter ad = bm.getAdapter();
+            if (ad == null || !ad.isEnabled()) return false;
+            return !bm.getConnectedDevices(BluetoothProfile.GATT).isEmpty()
+                    || !bm.getConnectedDevices(BluetoothProfile.GATT_SERVER).isEmpty();
+        } catch (Exception e) {
+            Logx.i(c, "读蓝牙连接状态失败（多半是缺 BLUETOOTH_CONNECT）: " + e);
+            return false;
+        }
     }
 
     private static int minutes(String hhmm) {

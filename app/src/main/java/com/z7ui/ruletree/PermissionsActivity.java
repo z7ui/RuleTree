@@ -82,6 +82,9 @@ public class PermissionsActivity extends AppCompatActivity {
         addRow("蓝牙连接", "用「蓝牙」触发规则时要给。不给的话只知道有设备连上或断开，\n读不到是哪一台，限定了设备的规则不会触发。",
                 btGranted(), v -> requestBt());
 
+        addRow("无障碍", "用「返回、回到主屏、锁屏、点击、滑动」这类动作时要开。\n只申请手势能力，不订阅界面事件，读不到屏幕上的内容。",
+                accessibilityOn(), v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+
         addRow("精确闹钟", "用「每天固定时间」时要给。不给的话定时会退成 10 分钟窗口，\n可能晚几分钟才跑。",
                 exactAlarm(), v -> openExactAlarm());
 
@@ -176,6 +179,18 @@ public class PermissionsActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT < 31) return true;
         AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
         return am != null && am.canScheduleExactAlarms();
+    }
+
+    /** 无障碍没有可查询的运行时权限，只能读系统设置里已启用的服务列表。 */
+    private boolean accessibilityOn() {
+        String want = getPackageName() + "/" + GestureService.class.getName();
+        String cur = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (cur == null) return false;
+        for (String s : cur.split(":")) {
+            if (s.equalsIgnoreCase(want)) return true;
+        }
+        return false;
     }
 
     private boolean ignoringBattery() {

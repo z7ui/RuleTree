@@ -103,7 +103,16 @@ v1 支持的叶子条件：
 | `wifi_connected` | `ssid`（可选）、`matchAny`（bool） | 连着指定 SSID 或任意 Wi-Fi。读 SSID 需要定位权限，没给就只能判断 matchAny |
 | `charging` | 无 | 正在充电 |
 | `battery_below` | `pct`（int，0-100） | 电量低于阈值 |
+| `battery_above` | `pct`（int，0-100） | 电量高于阈值 |
 | `time_between` | `start` / `end`（"HH:mm"，允许跨零点） | 当前时间在区间内 |
+| `day_of_week` | `days`（"1,3,5"，周一=1；空串=每天） | 今天是这几天的任意一天 |
+| `screen_on` | 无 | 屏幕亮着且已唤醒 |
+| `keyguard_locked` | 无 | 当前处于锁屏 |
+| `dnd_on` | 无 | 免打扰不在「全部允许」状态 |
+| `ringer_silent` / `ringer_vibrate` / `ringer_normal` | 无 | 判断当前铃声模式 |
+| `dark_mode` | 无 | 系统处于深色模式 |
+| `bt_connected` | 无 | 至少连着一个蓝牙设备（需要 BLUETOOTH_CONNECT） |
+| `headset` | 无 | 插着有线耳机 |
 
 `negate` 是所有条件都有的开关，等价于「不满足」。比造一堆反向类型省事。
 组上也能加 `negate`，意思是「这一组整体不成立」。
@@ -127,10 +136,24 @@ v1 支持的叶子条件：
 | :--- | :--- | :--- |
 | `ringer_mode` | `mode`: `silent` / `vibrate` / `normal` | 需要勿扰访问权限 |
 | `media_volume` | `value`（0-100） | 设置媒体音量 |
+| `volume_ring` / `volume_alarm` / `volume_notification` | `value`（0-100） | 分别设铃声音量、闹钟音量、通知音量 |
+| `dnd_on` / `dnd_off` | 无 | 免打扰开关，需要勿扰访问权限 |
+| `vibrate` | `ms`（毫秒） | 振一下 |
+| `media_play_pause` / `media_next` / `media_prev` | 无 | 派发媒体键 |
+| `torch_on` / `torch_off` | 无 | 手电筒，不需要 CAMERA 权限 |
+| `open_url` | `url` | 用浏览器打开网址 |
+| `copy_text` | `text` | 写入剪贴板 |
+| `tts` | `text` | 用系统 TTS 朗读，机器上没装引擎就跳过 |
+| `http_request` | `url`、`body`（空=GET，非空=POST） | 超时 10 秒，返回码写进日志 |
 | `open_app` | `pkg` | 打开应用 |
 | `notify` | `title`、`text` | 发一条通知 |
+| `g_back` / `g_home` / `g_recents` / `g_notifications` / `g_quick_settings` / `g_lock` | 无 | 无障碍全局动作：返回、主屏、最近任务、通知栏、快捷设置、锁屏 |
+| `g_tap` | `x`、`y` | 无障碍合成点击 |
+| `g_swipe` | `x1`、`y1`、`x2`、`y2` | 无障碍合成滑动，固定 300ms |
 | `delay` | `ms`（毫秒，上限 30000） | 等一会儿再继续。引擎在后台线程跑，不会卡界面 |
 | `confirm` | `text`、`sec`（默认 15） | 发通知等用户点「执行」。超时或点「算了」会取消这一支剩下的动作 |
+| `wait_unlock` | `sec`（默认 60） | 锁屏时先停住，解锁后继续；超时也往下走 |
+| `stop` | 无 | 主动结束这一支，后面的动作都不执行 |
 
 ## 三、完整示例
 

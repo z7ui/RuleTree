@@ -186,35 +186,13 @@ public class Model {
             return describe(0);
         }
 
-        /** depth 只是防御：数据万一被写坏了绕成环，也不至于把界面撑爆。 */
+        /** 条件的中文描述。具体文案在 Capabilities 里，和界面共用一份。 */
         private String describe(int depth) {
             if (isGroup()) {
                 String inner = groupDescribe(depth);
                 return negate ? "不满足（" + inner + "）" : inner;
             }
-            String base;
-            switch (type) {
-                case "wifi_connected": {
-                    boolean any = params.optBoolean("matchAny", false);
-                    String ssid = params.optString("ssid", "");
-                    base = any || ssid.isEmpty() ? "连着 Wi-Fi" : "连着 Wi-Fi「" + ssid + "」";
-                    break;
-                }
-                case "charging":
-                    base = "正在充电";
-                    break;
-                case "battery_below":
-                    base = "电量低于 " + params.optInt("pct", 20) + "%";
-                    break;
-                case "time_between": {
-                    String s = params.optString("start", "00:00");
-                    String e = params.optString("end", "23:59");
-                    base = "时间在 " + s + " 到 " + e + " 之间";
-                    break;
-                }
-                default:
-                    base = "总是成立";
-            }
+            String base = Capabilities.describeCond(type, params);
             return negate ? "不满足「" + base + "」" : base;
         }
 
@@ -312,26 +290,7 @@ public class Model {
         }
 
         public static String describeAction(String action, JSONObject p) {
-            switch (action == null ? "" : action) {
-                case "ringer_mode": {
-                    String m = p.optString("mode", "silent");
-                    String v = "silent".equals(m) ? "静音" : "vibrate".equals(m) ? "振动" : "正常响铃";
-                    return "铃声切到" + v;
-                }
-                case "media_volume":
-                    return "媒体音量设为 " + p.optInt("value", 50) + "%";
-                case "open_app":
-                    return "打开 " + p.optString("label", p.optString("pkg", "?"));
-                case "notify":
-                    return "发通知：" + p.optString("title", "提示");
-                case "delay":
-                    return "等待 " + Math.round(p.optLong("ms", 1000) / 1000.0) + " 秒";
-                case "confirm":
-                    return "执行前确认：" + p.optString("text", "继续？")
-                            + "（" + p.optInt("sec", 15) + " 秒内）";
-                default:
-                    return "未知动作 " + action;
-            }
+            return Capabilities.describeAction(action, p);
         }
     }
 }

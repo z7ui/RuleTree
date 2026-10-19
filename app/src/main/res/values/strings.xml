@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">规则树</string>
+    <string name="accessibility_desc">规则树用这项权限执行「返回、回到主屏、锁屏、点按和滑动」这类动作。除了你亲手创建的规则，它不读屏幕内容。</string>
 </resources>

@@ -113,6 +113,7 @@ v1 支持的叶子条件：
 | `dark_mode` | 无 | 系统处于深色模式 |
 | `bt_connected` | 无 | 至少连着一个蓝牙设备（需要 BLUETOOTH_CONNECT） |
 | `headset` | 无 | 插着有线耳机 |
+| `app_foreground` | `pkg`、`label`（显示用） | 当前前台应用是它。优先用无障碍的事件流记下的包名，没开无障碍时退回使用情况统计 |
 
 `negate` 是所有条件都有的开关，等价于「不满足」。比造一堆反向类型省事。
 组上也能加 `negate`，意思是「这一组整体不成立」。
@@ -150,6 +151,14 @@ v1 支持的叶子条件：
 | `g_back` / `g_home` / `g_recents` / `g_notifications` / `g_quick_settings` / `g_lock` | 无 | 无障碍全局动作：返回、主屏、最近任务、通知栏、快捷设置、锁屏 |
 | `g_tap` | `x`、`y` | 无障碍合成点击 |
 | `g_swipe` | `x1`、`y1`、`x2`、`y2` | 无障碍合成滑动，固定 300ms |
+| `screenshot` | 无 | 无障碍截屏，存到 `Pictures/RuleTree/`，Android 11 以上 |
+| `gesture_seq` | `steps`（数组） | 录制下来的手势序列。每步 `{type:tap,x,y}` 或 `{type:swipe,x1,y1,x2,y2,ms}`，都带 `delay` |
+| `sys_airplane` / `sys_mobile_data` / `sys_wifi` / `sys_bluetooth` / `sys_nfc` / `sys_location` | `mode`: `on` / `off` | 系统开关，走 root 的 `svc` / `cmd`；定位和深色模式在有 `WRITE_SECURE_SETTINGS` 时直接写设置 |
+| `sys_hotspot` | `mode`、`ssid`、`pass` | 个人热点，开的时候要名字和密码 |
+| `sys_brightness` / `sys_timeout` / `sys_auto_rotate` / `sys_font_scale` / `sys_density` / `sys_resolution` | `value` / `sec` / `mode` / `w`+`h` | 显示相关，优先直接写设置，失败退回 root |
+| `sys_stay_awake` / `sys_screen_off` | `mode` / 无 | 充电时不息屏；立刻熄屏 |
+| `force_stop` | `pkg` | `am force-stop`，要 root |
+| `shell` | `cmd` | 任意 shell 命令，root 跑，超时 15 秒 |
 | `delay` | `ms`（毫秒，上限 30000） | 等一会儿再继续。引擎在后台线程跑，不会卡界面 |
 | `confirm` | `text`、`sec`（默认 15） | 发通知等用户点「执行」。超时或点「算了」会取消这一支剩下的动作 |
 | `wait_unlock` | `sec`（默认 60） | 锁屏时先停住，解锁后继续；超时也往下走 |

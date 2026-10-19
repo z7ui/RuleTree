@@ -132,3 +132,27 @@ AI 图片与文本、天气、场景引擎。这些不是权限问题，是对�
 
 源数据：`apk-re/raw/preload_all.txt`（241 个类）、`apk-re/zh_strings.tsv`（2393 条中文资源）、
 `apk-re/miui/autotask_zh.tsv`（小米 186 条）。
+
+---
+
+## 五、0.9 的进展（B 类落地）
+
+上面这张表是 0.7 时写的，当时 B 类一个没做。0.9 补上了，方式是加一层 `Root`（`su -c`）。
+
+已验证能跑：Wi-Fi 开关、蓝牙开关、屏幕亮度、屏幕超时、自动旋转、深色模式、任意 shell 命令。
+验证方式都是「跑完去读系统设置确认真的变了」，不是只看返回码。
+
+亮度、超时、旋转、深色模式还有一条更省事的路径：拿到 `WRITE_SECURE_SETTINGS` 就直接写
+`Settings.System` / `Settings.Secure`，不用 root。这个权限普通安装拿不到，得用 adb 授一次：
+
+```
+adb shell pm grant com.z7ui.ruletree android.permission.WRITE_SECURE_SETTINGS
+```
+
+剩下的 B 类（飞行模式、移动数据、热点、NFC、密度、分辨率、强制停止）只走 root，
+命令和 ROM 有关，换机器可能要调。
+
+另外补了 A 类剩下的三项：截屏（无障碍 `takeScreenshot`）、当前应用是（无障碍事件流，
+只要包名）、手势录制回放（半透明覆盖层记坐标，再用 `dispatchGesture` 回放）。
+
+现在的数量：动作 51、条件 17、触发器 6。三星那边非生态的部分，能做的差不多齐了。

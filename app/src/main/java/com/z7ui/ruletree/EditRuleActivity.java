@@ -23,6 +23,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.ItemTouchHelper;
@@ -65,6 +67,26 @@ public class EditRuleActivity extends AppCompatActivity {
 
     /** 打开着的组合条件弹窗，主界面重绘时一并刷新它们的内容。 */
     private final List<Runnable> groupRefreshers = new ArrayList<>();
+
+    /** 录手势时临时记住要挂到哪一组动作里 */
+    private List<Model.Node> macroTarget;
+
+    private final ActivityResultLauncher<Intent> macroLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
+                if (res.getResultCode() != RESULT_OK || res.getData() == null) return;
+                String json = res.getData().getStringExtra("steps");
+                if (json == null || json.isEmpty() || macroTarget == null) return;
+                Model.Node n = new Model.Node();
+                n.type = "action";
+                n.action = "gesture_seq";
+                try {
+                    n.params.put("steps", new org.json.JSONArray(json));
+                } catch (Exception ignored) {
+                }
+                macroTarget.add(n);
+                macroTarget = null;
+                render();
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -792,6 +814,7 @@ public class EditRuleActivity extends AppCompatActivity {
                 "铃声正常响",
                 "深色模式开着",
                 "插着有线耳机",
+                "当前应用是（填包名）",
                 "组合条件（并且 / 或者）"
         };
         new AlertDialog.Builder(this)
@@ -852,6 +875,17 @@ public class EditRuleActivity extends AppCompatActivity {
                             applyCond(cond("headset"));
                             break;
                         case 17:
+                            askText("哪个应用在前台", "填包名，比如 com.tencent.mm", "", v -> {
+                                if (v.isEmpty()) return;
+                                Model.Cond c = cond("app_foreground", "pkg", v);
+                                try {
+                                    c.params.put("label", v);
+                                } catch (Exception ignored) {
+                                }
+                                applyCond(c);
+                            });
+                            break;
+                        case 18:
                             startGroup();
                             break;
                         default:
@@ -1057,6 +1091,23 @@ public class EditRuleActivity extends AppCompatActivity {
         void on(int v);
     }
 
+    private interface OnText {
+        void on(String v);
+    }
+
+    /** 通用文本输入框，包名、网址这类都走它。 */
+    private void askText(String title, String hint, String def, final OnText cb) {
+        EditText et = new EditText(this);
+        et.setHint(hint);
+        et.setText(def);
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(et)
+                .setPositiveButton("确定", (d, w) -> cb.on(et.getText().toString().trim()))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void askNumber(String title, int def, final OnNumber cb, final boolean thenNegate) {
         EditText et = new EditText(this);
         et.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -1128,6 +1179,10 @@ public class EditRuleActivity extends AppCompatActivity {
                     render();
                 }, false);
                 return;
+            case "gesture_seq":
+                macroTarget = target;
+                macroLauncher.launch(new Intent(this, MacroActivity.class));
+                return;
             case "ringer_mode": {
                 final String[] modes = {"静音", "振动", "正常响铃"};
                 final String[] keys = {"silent", "vibrate", "normal"};
@@ -1157,13 +1212,15 @@ public class EditRuleActivity extends AppCompatActivity {
         askParams(def, target);
     }
 
-    /** 按 Capabilities 里的参数定义生成输入框，一行一个参数。 */
+    /** 按 Capabilities 里的参数定义生成输入控件，一行一个参数；choice 类型给下拉框。 */
     private void askParams(final Capabilities.Def def, final List<Model.Node> target) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(20), dp(8), dp(20), 0);
 
         final List<EditText> inputs = new ArrayList<>();
+        final List<android.widget.Spinner> spinners = new ArrayList<>();
+
         for (Capabilities.Arg arg : def.args) {
             TextView label = new TextView(this);
             label.setText(arg.label);
@@ -1171,12 +1228,28 @@ public class EditRuleActivity extends AppCompatActivity {
             label.setPadding(0, dp(6), 0, 0);
             box.addView(label);
 
-            EditText et = new EditText(this);
-            et.setHint(arg.label);
-            et.setText(arg.def);
-            if (arg.isInt()) et.setInputType(InputType.TYPE_CLASS_NUMBER);
-            box.addView(et);
-            inputs.add(et);
+            if (arg.isChoice()) {
+                android.widget.Spinner sp = new android.widget.Spinner(this);
+                String[] keys = arg.choices();
+                List<String> labels = new ArrayList<>();
+                for (String k : keys) labels.add(arg.choiceLabel(k));
+                sp.setAdapter(new android.widget.ArrayAdapter<>(this,
+                        android.R.layout.simple_spinner_dropdown_item, labels));
+                for (int i = 0; i < keys.length; i++) {
+                    if (keys[i].equals(arg.def)) sp.setSelection(i);
+                }
+                box.addView(sp);
+                spinners.add(sp);
+                inputs.add(null);
+            } else {
+                EditText et = new EditText(this);
+                et.setHint(arg.label);
+                et.setText(arg.def);
+                if (arg.isInt()) et.setInputType(InputType.TYPE_CLASS_NUMBER);
+                box.addView(et);
+                spinners.add(null);
+                inputs.add(et);
+            }
         }
 
         AlertDialog.Builder b = new AlertDialog.Builder(this)
@@ -1189,6 +1262,12 @@ public class EditRuleActivity extends AppCompatActivity {
                     try {
                         for (int i = 0; i < def.args.size(); i++) {
                             Capabilities.Arg arg = def.args.get(i);
+                            if (arg.isChoice()) {
+                                int sel = spinners.get(i).getSelectedItemPosition();
+                                String[] keys = arg.choices();
+                                n.params.put(arg.key, keys[Math.max(0, Math.min(sel, keys.length - 1))]);
+                                continue;
+                            }
                             String v = inputs.get(i).getText().toString().trim();
                             if (arg.isInt()) {
                                 int num;

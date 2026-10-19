@@ -2,8 +2,24 @@ package com.z7ui.ruletree;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Path;
+import android.hardware.HardwareBuffer;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.OutputStream;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 无障碍服务。只做两件事：系统级导航（返回/主屏/最近任务/锁屏），和合成手势（点、滑）。
@@ -22,9 +38,15 @@ public class GestureService extends AccessibilityService {
     public static final int GLOBAL_LOCK = AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN;
 
     private static GestureService instance;
+    /** 当前前台应用的包名，靠窗口事件更新。只留包名，不留任何界面内容。 */
+    private static volatile String lastPkg;
 
     public static boolean available() {
         return instance != null;
+    }
+
+    public static String foregroundPackage() {
+        return lastPkg;
     }
 
     public static boolean global(int action) {
@@ -77,6 +99,114 @@ public class GestureService extends AccessibilityService {
         }
     }
 
+    /**
+     * 回放录下来的一段手势。每步之间按录制时的间隔停一下，
+     * 派发之后也要等一下，否则手势还没画完下一步就叠上去了。
+     */
+    public static boolean play(Context c, JSONArray steps) {
+        GestureService s = instance;
+        if (s == null) {
+            Logx.i(c, "无障碍服务没开，手势序列跳过");
+            return false;
+        }
+        if (steps == null || steps.length() == 0) return false;
+        boolean all = true;
+        for (int i = 0; i < steps.length(); i++) {
+            JSONObject st = steps.optJSONObject(i);
+            if (st == null) continue;
+            long delay = Math.max(0, Math.min(10000, st.optLong("delay", 0)));
+            if (delay > 0) sleep(delay);
+            long dur;
+            boolean ok;
+            if ("swipe".equals(st.optString("type"))) {
+                dur = Math.max(50, Math.min(3000, st.optLong("ms", 300)));
+                Path p = new Path();
+                p.moveTo(st.optInt("x1"), st.optInt("y1"));
+                p.lineTo(st.optInt("x2"), st.optInt("y2"));
+                ok = s.dispatch(p, 0, dur);
+            } else {
+                dur = 60;
+                Path p = new Path();
+                p.moveTo(st.optInt("x"), st.optInt("y"));
+                ok = s.dispatch(p, 0, dur);
+            }
+            all &= ok;
+            Logx.i(s, "第 " + (i + 1) + "/" + steps.length() + " 步 → " + ok);
+            sleep(dur + 60);
+        }
+        return all;
+    }
+
+    /** 截屏。Android 11 起无障碍才有这个能力，存到相册 Pictures/RuleTree。 */
+    public static boolean screenshot(Context c) {
+        final GestureService s = instance;
+        if (s == null) {
+            Logx.i(c, "无障碍服务没开，截屏跳过");
+            return false;
+        }
+        if (Build.VERSION.SDK_INT < 30) {
+            Logx.i(c, "系统低于 Android 11，无障碍截不了屏");
+            return false;
+        }
+        final Context app = c.getApplicationContext();
+        final CountDownLatch latch = new CountDownLatch(1);
+        final boolean[] ok = {false};
+        try {
+            s.takeScreenshot(Display.DEFAULT_DISPLAY, app.getMainExecutor(),
+                    new TakeScreenshotCallback() {
+                        @Override
+                        public void onSuccess(ScreenshotResult r) {
+                            try {
+                                ok[0] = save(app, r.getHardwareBuffer());
+                            } catch (Exception e) {
+                                Logx.i(app, "截图保存失败: " + e);
+                            }
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onFailure(int errorCode) {
+                            Logx.i(app, "截图失败，错误码 " + errorCode);
+                            latch.countDown();
+                        }
+                    });
+            latch.await(6, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            Logx.i(app, "截屏异常: " + e);
+        }
+        return ok[0];
+    }
+
+    private static boolean save(Context c, HardwareBuffer buf) throws Exception {
+        Bitmap hw = Bitmap.wrapHardwareBuffer(buf, null);
+        if (hw == null) return false;
+        Bitmap soft = hw.copy(Bitmap.Config.ARGB_8888, false);
+        hw.recycle();
+        if (soft == null) return false;
+
+        String name = "RuleTree-" + System.currentTimeMillis() + ".png";
+        ContentValues v = new ContentValues();
+        v.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+        v.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+        v.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/RuleTree");
+        ContentResolver cr = c.getContentResolver();
+        Uri uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+        if (uri == null) return false;
+        try (OutputStream out = cr.openOutputStream(uri)) {
+            soft.compress(Bitmap.CompressFormat.PNG, 100, out);
+        }
+        soft.recycle();
+        Logx.i(c, "截图已存相册：Pictures/RuleTree/" + name);
+        return true;
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+        }
+    }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -86,7 +216,13 @@ public class GestureService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // 不需要监听事件，手势和全局动作都不依赖事件流
+        // 只取包名：用来判断「当前应用是」这个条件。界面内容一概不读。
+        if (event == null) return;
+        try {
+            CharSequence p = event.getPackageName();
+            if (p != null && p.length() > 0) lastPkg = p.toString();
+        } catch (Exception ignored) {
+        }
     }
 
     @Override

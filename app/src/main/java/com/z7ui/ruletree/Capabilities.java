@@ -37,6 +37,24 @@ public class Capabilities {
             return "int".equals(type);
         }
 
+        public boolean isChoice() {
+            return "choice".equals(type);
+        }
+
+        /** choice 类型的可选项：{"on","off"} */
+        public String[] choices() {
+            if (alias.isEmpty()) return new String[0];
+            String[] pairs = alias.split(",");
+            String[] out = new String[pairs.length];
+            for (int i = 0; i < pairs.length; i++) out[i] = pairs[i].split("=", 2)[0];
+            return out;
+        }
+
+        public String choiceLabel(String key) {
+            String v = pretty(key);
+            return v == null ? key : v;
+        }
+
         public String pretty(String v) {
             if (alias.isEmpty() || v == null) return v;
             for (String pair : alias.split(",")) {
@@ -130,6 +148,47 @@ public class Capabilities {
         a("g_swipe", "滑动", "手势", "从 (%s, %s) 滑到 (%s, %s)", "屏幕坐标，左上角是 0,0", false,
                 "x1|起点 X|int|540", "y1|起点 Y|int|1800",
                 "x2|终点 X|int|540", "y2|终点 Y|int|600");
+        a("gesture_seq", "手势序列（录制）", "手势", "", "录一段点击和滑动，触发时按顺序回放", true);
+        a("screenshot", "截屏", "手势", "截一张图存到相册", "需要「无障碍」权限，Android 11 以上", false);
+
+        // 系统开关：没有公开 API，全靠 root
+        a("sys_airplane", "飞行模式", "系统（root）", "飞行模式%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_mobile_data", "移动数据", "系统（root）", "移动数据%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_wifi", "Wi-Fi 开关", "系统（root）", "Wi-Fi %s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_bluetooth", "蓝牙开关", "系统（root）", "蓝牙%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_nfc", "NFC 开关", "系统（root）", "NFC %s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_location", "定位开关", "系统（root）", "定位%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_hotspot", "个人热点", "系统（root）", "热点%s", "开热点要填 SSID 和密码；关的时候不用", false,
+                "mode|开关|choice|on|on=打开,off=关闭",
+                "ssid|热点名称|text|RuleTree",
+                "pass|热点密码|text|12345678");
+        a("sys_brightness", "屏幕亮度", "系统（root）", "亮度设为 %s%%", "需要 root", false,
+                "value|亮度 0-100|int|50");
+        a("sys_timeout", "屏幕超时", "系统（root）", "屏幕 %s 秒后自动熄", "需要 root", false,
+                "sec|秒数（0=永不）|int|60");
+        a("sys_auto_rotate", "自动旋转", "系统（root）", "自动旋转%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_dark_mode", "深色模式", "系统（root）", "深色模式%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_font_scale", "字体大小", "系统（root）", "字体缩放到 %s%%", "100 是默认，需要 root", false,
+                "value|百分比 85-150|int|115");
+        a("sys_density", "屏幕密度", "系统（root）", "屏幕密度设为 %s", "填 0 恢复默认，需要 root", false,
+                "value|dpi（0=重置）|int|420");
+        a("sys_resolution", "分辨率", "系统（root）", "分辨率设为 %sx%s", "宽高都填 0 恢复默认，改错可能黑屏，需要 root", false,
+                "w|宽（0=重置）|int|1080", "h|高（0=重置）|int|2400");
+        a("sys_stay_awake", "充电时不息屏", "系统（root）", "充电时不息屏%s", "需要 root", false,
+                "mode|开关|choice|on|on=打开,off=关闭");
+        a("sys_screen_off", "立刻熄屏", "系统（root）", "立刻熄屏", "需要 root", false);
+        a("force_stop", "强行停止应用", "系统（root）", "强行停止 %s", "填包名，比如 com.tencent.mm，需要 root", false,
+                "pkg|包名|text|");
+        a("shell", "执行 shell 命令", "系统（root）", "执行命令：%s", "用 root 跑，超时 15 秒，输出进日志", false,
+                "cmd|命令|text|");
 
         // 流程
         a("notify", "发通知", "流程", "", null, true);
@@ -180,6 +239,10 @@ public class Capabilities {
             case "confirm":
                 return "执行前确认：" + p.optString("text", "继续？")
                         + "（" + p.optInt("sec", 15) + " 秒内）";
+            case "gesture_seq": {
+                org.json.JSONArray a = p.optJSONArray("steps");
+                return "回放手势 " + (a == null ? 0 : a.length()) + " 步";
+            }
             default:
                 break;
         }
@@ -261,6 +324,8 @@ public class Capabilities {
                 return "连着蓝牙设备";
             case "headset":
                 return "插着有线耳机";
+            case "app_foreground":
+                return "当前应用是 " + p.optString("label", p.optString("pkg", "?"));
             case "always":
             default:
                 return "总是成立";

@@ -2,6 +2,7 @@ package com.z7ui.ruletree;
 
 import android.Manifest;
 import android.app.AlarmManager;
+import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -9,6 +10,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.os.Process;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -84,6 +86,12 @@ public class PermissionsActivity extends AppCompatActivity {
 
         addRow("无障碍", "用「返回、回到主屏、锁屏、点击、滑动」这类动作时要开。\n只申请手势能力，不订阅界面事件，读不到屏幕上的内容。",
                 accessibilityOn(), v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+
+        addRow("使用情况访问", "「当前应用是」这条条件优先用无障碍事件流，不依赖它；\n这里给上是备用路径，无障碍没开时才会走这边。",
+                usageAccess(), v -> startSafely(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+
+        addRow("Root", "「系统（root）」那一组动作要用：飞行模式、移动数据、Wi-Fi 与蓝牙开关、\n热点、亮度、超时、深色模式、强制停止、任意 shell 命令。\n检测不了状态，点一下会真跑一次 su，管理器里允许即可。",
+                null, v -> checkRoot());
 
         addRow("精确闹钟", "用「每天固定时间」时要给。不给的话定时会退成 10 分钟窗口，\n可能晚几分钟才跑。",
                 exactAlarm(), v -> openExactAlarm());
@@ -191,6 +199,31 @@ public class PermissionsActivity extends AppCompatActivity {
             if (s.equalsIgnoreCase(want)) return true;
         }
         return false;
+    }
+
+    private boolean usageAccess() {
+        try {
+            AppOpsManager ao = (AppOpsManager) getSystemService(APP_OPS_SERVICE);
+            if (ao == null) return false;
+            int mode = ao.unsafeCheckOpNoThrow("android:get_usage_stats",
+                    Process.myUid(), getPackageName());
+            return mode == AppOpsManager.MODE_ALLOWED;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** su 得在后台跑，UI 线程不能等进程。 */
+    private void checkRoot() {
+        Toast.makeText(this, "正在确认 root…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final boolean ok = Root.available(this);
+            runOnUiThread(() -> {
+                Toast.makeText(this, ok ? "能拿到 root" : "拿不到 root，系统开关类动作会跳过",
+                        Toast.LENGTH_LONG).show();
+                render();
+            });
+        }).start();
     }
 
     private boolean ignoringBattery() {

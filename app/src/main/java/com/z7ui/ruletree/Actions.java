@@ -99,6 +99,68 @@ public class Actions {
                 case "g_swipe":
                     return GestureService.swipe(params.optInt("x1", 0), params.optInt("y1", 0),
                             params.optInt("x2", 0), params.optInt("y2", 0), 300);
+                case "gesture_seq":
+                    return GestureService.play(c, params.optJSONArray("steps"));
+                case "screenshot":
+                    return GestureService.screenshot(c);
+
+                // 下面这批没有公开 API，全走 root
+                case "sys_airplane":
+                    return airplane(c, on(params));
+                case "sys_mobile_data":
+                    return svc(c, "data", on(params));
+                case "sys_wifi":
+                    return svc(c, "wifi", on(params));
+                case "sys_bluetooth":
+                    return bluetooth(c, on(params));
+                case "sys_nfc":
+                    return svc(c, "nfc", on(params));
+                case "sys_location":
+                    return location(c, on(params));
+                case "sys_hotspot":
+                    return hotspot(c, on(params), params.optString("ssid", "RuleTree"),
+                            params.optString("pass", "12345678"));
+                case "sys_brightness": {
+                    int pct = Math.max(0, Math.min(100, params.optInt("value", 50)));
+                    // 系统亮度是 0-255，按百分比换算
+                    return putSystem(c, "screen_brightness", pct * 255 / 100);
+                }
+                case "sys_timeout": {
+                    int sec = Math.max(0, params.optInt("sec", 60));
+                    return putSystem(c, "screen_off_timeout", (int) (sec * 1000L));
+                }
+                case "sys_auto_rotate":
+                    return putSystem(c, "accelerometer_rotation", "on".equals(on(params)) ? 1 : 0);
+                case "sys_dark_mode":
+                    return darkMode(c, "on".equals(on(params)));
+                case "sys_font_scale": {
+                    int pct = Math.max(85, Math.min(150, params.optInt("value", 115)));
+                    return putSystemFloat(c, "font_scale", pct / 100f);
+                }
+                case "sys_density": {
+                    int v = params.optInt("value", 0);
+                    return Root.run(c, v <= 0 ? "wm density reset" : "wm density " + v).ok;
+                }
+                case "sys_resolution": {
+                    int w = params.optInt("w", 0);
+                    int h = params.optInt("h", 0);
+                    return Root.run(c, (w <= 0 || h <= 0)
+                            ? "wm size reset" : "wm size " + w + "x" + h).ok;
+                }
+                case "sys_stay_awake":
+                    return Root.run(c, "svc power stayon " + ("on".equals(on(params)) ? "true" : "false")).ok;
+                case "sys_screen_off":
+                    return Root.run(c, "input keyevent 223").ok;
+                case "force_stop": {
+                    String pkg = params.optString("pkg", "").trim();
+                    if (pkg.isEmpty()) return false;
+                    return Root.run(c, "am force-stop " + pkg).ok;
+                }
+                case "shell": {
+                    String cmd = params.optString("cmd", "").trim();
+                    if (cmd.isEmpty()) return false;
+                    return Root.run(c, cmd).ok;
+                }
                 default:
                     Logx.i(c, "未知动作，跳过: " + action);
                     return false;
@@ -285,6 +347,104 @@ public class Actions {
         }
         Logx.i(c, "等到超时还没解锁，继续往下走");
         return false;
+    }
+
+    // ---------------- root 那批系统开关 ----------------
+
+    /**
+     * 写 Settings.System。拿到 WRITE_SECURE_SETTINGS 就能直接写，
+     * 没拿到再退回 root 跑 settings put。
+     */
+    private static boolean putSystem(Context c, String key, int value) {
+        try {
+            if (android.provider.Settings.System.putInt(c.getContentResolver(), key, value)) {
+                Logx.i(c, "settings." + key + " = " + value);
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        Logx.i(c, "直接写设置没权限，改用 root");
+        return Root.run(c, "settings put system " + key + " " + value).ok;
+    }
+
+    private static boolean putSystemFloat(Context c, String key, float value) {
+        try {
+            if (android.provider.Settings.System.putFloat(c.getContentResolver(), key, value)) {
+                Logx.i(c, "settings." + key + " = " + value);
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return Root.run(c, "settings put system " + key + " " + value).ok;
+    }
+
+    /** 深色模式：secure 里的 ui_night_mode，2=开 1=关。 */
+    private static boolean darkMode(Context c, boolean on) {
+        try {
+            boolean ok = android.provider.Settings.Secure.putInt(c.getContentResolver(),
+                    "ui_night_mode", on ? 2 : 1);
+            if (ok) {
+                Logx.i(c, "深色模式" + (on ? "打开" : "关闭"));
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return Root.run(c, "cmd uimode night " + (on ? "yes" : "no")).ok;
+    }
+
+    /** 参数里的 mode 统一成 "on" / "off"。 */
+    private static String on(JSONObject p) {
+        return "off".equals(p.optString("mode", "on")) ? "off" : "on";
+    }
+
+    private static boolean svc(Context c, String what, String mode) {
+        return Root.run(c, "svc " + what + ("on".equals(mode) ? " enable" : " disable")).ok;
+    }
+
+    /**
+     * 飞行模式。Android 11 起有 cmd 接口，老版本只能改设置再发广播。
+     * 两条都试，第一条不成就走退路。
+     */
+    private static boolean airplane(Context c, String mode) {
+        boolean on = "on".equals(mode);
+        if (Root.run(c, "cmd connectivity airplane-mode " + (on ? "enable" : "disable")).ok) {
+            return true;
+        }
+        boolean ok = Root.run(c, "settings put global airplane_mode_on " + (on ? 1 : 0)).ok;
+        Root.run(c, "am broadcast -a android.intent.action.AIRPLANE_MODE --ez state " + on);
+        return ok;
+    }
+
+    private static boolean bluetooth(Context c, String mode) {
+        boolean on = "on".equals(mode);
+        if (Root.run(c, "cmd bluetooth_manager " + (on ? "enable" : "disable")).ok) return true;
+        return svc(c, "bluetooth", mode);
+    }
+
+    private static boolean location(Context c, String mode) {
+        boolean on = "on".equals(mode);
+        try {
+            if (android.provider.Settings.Secure.putInt(c.getContentResolver(),
+                    "location_mode", on ? 3 : 0)) {
+                Logx.i(c, "定位已" + (on ? "打开" : "关闭"));
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        if (Root.run(c, "cmd location set-location-enabled " + on).ok) return true;
+        return Root.run(c, "settings put secure location_mode " + (on ? 3 : 0)).ok;
+    }
+
+    /** 热点：开的时候要 SSID 和密码，关的时候直接 stop。 */
+    private static boolean hotspot(Context c, String mode, String ssid, String pass) {
+        if (!"on".equals(mode)) {
+            return Root.run(c, "cmd wifi stop-softap").ok;
+        }
+        Root.Result r = Root.run(c,
+                "cmd wifi start-softap " + ssid + " wpa2 " + pass);
+        if (r.ok) return true;
+        // 有些版本参数顺序是 <ssid> <open|wpa2> <pass>，也有些只认 <ssid> open
+        return Root.run(c, "cmd wifi start-softap " + ssid).ok;
     }
 
     private static boolean openApp(Context c, String pkg) {

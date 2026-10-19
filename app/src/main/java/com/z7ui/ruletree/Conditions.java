@@ -87,6 +87,8 @@ public class Conditions {
                         & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
             case "bt_connected":
                 return btConnected(c);
+            case "app_foreground":
+                return appForeground(c, cond.params.optString("pkg", ""));
             case "headset": {
                 AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
                 return am != null && am.isWiredHeadsetOn();
@@ -187,6 +189,42 @@ public class Conditions {
                     || !bm.getConnectedDevices(BluetoothProfile.GATT_SERVER).isEmpty();
         } catch (Exception e) {
             Logx.i(c, "读蓝牙连接状态失败（多半是缺 BLUETOOTH_CONNECT）: " + e);
+            return false;
+        }
+    }
+
+    /**
+     * 当前前台应用。优先用无障碍事件流记下的包名，它最及时；
+     * 无障碍没开时退回 UsageStatsManager（要「使用情况访问」）。
+     */
+    private static boolean appForeground(Context c, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        String fromA11y = GestureService.foregroundPackage();
+        if (fromA11y != null) return pkg.equals(fromA11y);
+        try {
+            android.app.usage.UsageStatsManager usm =
+                    (android.app.usage.UsageStatsManager) c.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return false;
+            long now = System.currentTimeMillis();
+            android.app.usage.UsageEvents ev = usm.queryEvents(now - 60000, now);
+            android.app.usage.UsageEvents.Event e = new android.app.usage.UsageEvents.Event();
+            String last = null;
+            long ts = 0;
+            while (ev.hasNextEvent()) {
+                ev.getNextEvent(e);
+                if (e.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
+                        && e.getTimeStamp() >= ts) {
+                    ts = e.getTimeStamp();
+                    last = e.getPackageName();
+                }
+            }
+            if (last == null) {
+                Logx.i(c, "读不到前台应用，多半是没给「使用情况访问」");
+                return false;
+            }
+            return pkg.equals(last);
+        } catch (Exception ex) {
+            Logx.i(c, "查前台应用失败: " + ex);
             return false;
         }
     }

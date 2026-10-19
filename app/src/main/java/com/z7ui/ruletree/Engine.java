@@ -25,9 +25,10 @@ public class Engine {
     /** 正在跑的规则 id。二次确认可能停十几秒，期间同一个规则又被触发就别再排一份。 */
     private static final Set<String> RUNNING = ConcurrentHashMap.newKeySet();
 
-    /** 一次执行的状态。目前只有一个标记：这一支是否被取消。 */
+    /** 一次执行的状态。aborted = 被取消，failed = 有动作返回失败。 */
     private static class Ctx {
         boolean aborted;
+        boolean failed;
     }
 
     /** 触发器入口。watch 是本次事件的具体值：connected / disconnected。 */
@@ -103,13 +104,20 @@ public class Engine {
             Logx.i(c, "「" + r.name + "」还在执行，这次触发跳过");
             return;
         }
+        long t = System.currentTimeMillis();
+        Ctx ctx = new Ctx();
         try {
             Logx.i(c, "── 开始执行「" + r.name + "」");
-            long t = System.currentTimeMillis();
-            Ctx ctx = new Ctx();
             runNode(c, r.tree, ctx);
+            long cost = System.currentTimeMillis() - t;
+            boolean ok = !ctx.failed && !ctx.aborted;
+            String note = ctx.failed ? "有动作失败" : (ctx.aborted ? "被取消" : "");
+            RunLog.record(c, r.id, ok, cost, note);
             Logx.i(c, "── 「" + r.name + "」" + (ctx.aborted ? "被取消" : "完成")
-                    + "，耗时 " + (System.currentTimeMillis() - t) + "ms");
+                    + "，耗时 " + cost + "ms");
+        } catch (Throwable e) {
+            RunLog.record(c, r.id, false, System.currentTimeMillis() - t, "执行异常：" + e);
+            Logx.i(c, "── 「" + r.name + "」异常终止: " + e);
         } finally {
             RUNNING.remove(r.id);
         }
@@ -152,6 +160,7 @@ public class Engine {
             return;
         }
         boolean ok = Actions.run(c, n.action, n.params);
+        if (!ok) ctx.failed = true;
         Logx.i(c, (ok ? "✓ " : "✗ ") + Model.Node.describeAction(n.action, n.params));
     }
 

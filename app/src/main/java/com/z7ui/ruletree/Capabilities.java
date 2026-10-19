@@ -41,6 +41,12 @@ public class Capabilities {
             return "choice".equals(type);
         }
 
+        /** 这几条一旦写错代价太大：任意 root 命令、杀进程、改分辨率/密度。 */
+        public static boolean isDanger(String key) {
+            return "shell".equals(key) || "force_stop".equals(key)
+                    || "sys_resolution".equals(key) || "sys_density".equals(key);
+        }
+
         /** choice 类型的可选项：{"on","off"} */
         public String[] choices() {
             if (alias.isEmpty()) return new String[0];
@@ -248,7 +254,9 @@ public class Capabilities {
         }
         Def d = findAction(key);
         if (d == null) return "未知动作 " + key;
-        if (d.args.isEmpty() || d.fmt.isEmpty()) return d.label.isEmpty() ? key : d.label;
+        String label = d.label.isEmpty() ? key : d.label;
+        if (Arg.isDanger(key)) label = "⚠ " + label;
+        if (d.args.isEmpty() || d.fmt.isEmpty()) return label;
         Object[] vals = new Object[d.args.size()];
         for (int i = 0; i < d.args.size(); i++) {
             Arg arg = d.args.get(i);
@@ -257,9 +265,10 @@ public class Capabilities {
             vals[i] = arg.pretty(v);
         }
         try {
-            return String.format(d.fmt, vals);
+            String s = String.format(d.fmt, vals);
+            return Arg.isDanger(key) ? "⚠ " + s : s;
         } catch (Exception e) {
-            return d.label;
+            return label;
         }
     }
 

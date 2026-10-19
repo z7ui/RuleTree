@@ -1156,6 +1156,21 @@ public class EditRuleActivity extends AppCompatActivity {
     }
 
     private void addAction(final Capabilities.Def def, final List<Model.Node> target) {
+        // 危险动作先停一下。规则跑起来的时候人未必在旁边，加之前得知道自己在加什么。
+        if (Capabilities.Arg.isDanger(def.key)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("这条动作有点危险")
+                    .setMessage("「" + def.label + "」会以 root 身份动系统，填错了可能让手机不可用，"
+                            + "而且规则自动跑的时候你不会在旁边。\n\n确定要加吗？")
+                    .setPositiveButton("我知道，继续", (d, w) -> addActionNow(def, target))
+                    .setNegativeButton("算了", null)
+                    .show();
+            return;
+        }
+        addActionNow(def, target);
+    }
+
+    private void addActionNow(final Capabilities.Def def, final List<Model.Node> target) {
         switch (def.key) {
             case "open_app":
                 pickApp(target);

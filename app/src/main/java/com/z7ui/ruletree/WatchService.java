@@ -68,6 +68,8 @@ public class WatchService extends Service {
         }
         // 定时规则不依赖这个服务，任何时候都重排一遍
         TimeScheduler.sync(c);
+        // 顺便挂上兜底闹钟：服务被系统清掉后，15 分钟内会被拉回来
+        Watchdog.schedule(c);
         if (enabled > 0) start(c);
         else stop(c);
     }

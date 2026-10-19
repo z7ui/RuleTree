@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
         menu.add(0, 3, 2, "查看日志");
         menu.add(0, 4, 3, "清除日志");
         menu.add(0, 5, 4, "关于");
+        menu.add(0, 6, 5, "运行记录");
         return true;
     }
 
@@ -94,6 +95,9 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             case 5:
                 showAbout();
+                return true;
+            case 6:
+                showRuns();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -191,6 +195,30 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    /** 每条规则上次跑成什么样，一个弹窗看完。 */
+    private void showRuns() {
+        List<Model.Rule> rules = RuleStore.load(this);
+        if (rules.isEmpty()) {
+            Toast.makeText(this, "还没有规则", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Model.Rule r : rules) {
+            sb.append("· ").append(r.name).append("\n   ")
+                    .append(RunLog.describe(this, r.id)).append("\n\n");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("运行记录")
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("关闭", null)
+                .setNegativeButton("清除记录", (d, w) -> {
+                    RunLog.clear(this);
+                    renderList();
+                    Toast.makeText(this, "已清除运行记录", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
     private void showAbout() {
         String body = "把「如果……则……否则……」做成可复用的规则。触发器和动作分开，条件成立走一边，不成立走另一边。\n\n"
                 + "· 规则存成 JSON 树，支持任意层级嵌套\n"
@@ -232,6 +260,7 @@ public class MainActivity extends AppCompatActivity {
             TextView trigger = item.findViewById(R.id.tvTrigger);
             TextView cond = item.findViewById(R.id.tvCond);
             TextView then = item.findViewById(R.id.tvThen);
+            TextView last = item.findViewById(R.id.tvLast);
             MaterialSwitch sw = item.findViewById(R.id.swEnabled);
 
             name.setText(r.name);
@@ -246,6 +275,12 @@ public class MainActivity extends AppCompatActivity {
             then.setText(branched ? "则：" + summarize(main)
                     + (r.tree.otherwise.isEmpty() ? "" : "　否则：" + summarize(r.tree.otherwise))
                     : "做：" + summarize(main));
+
+            String lastText = RunLog.describe(this, r.id);
+            last.setText(lastText);
+            last.setTextColor(ContextCompat.getColor(this,
+                    lastText.contains("失败") || lastText.contains("异常")
+                            ? R.color.perm_missing : R.color.perm_unknown));
 
             sw.setChecked(r.enabled);
             sw.setOnCheckedChangeListener((b, checked) -> {

@@ -82,6 +82,8 @@ public class Actions {
                 }
                 case "wait_unlock":
                     return waitUnlock(c, params.optInt("sec", 60));
+                case "wait_until":
+                    return waitUntil(c, params.optString("what", "wifi"), params.optInt("sec", 60));
                 case "g_back":
                     return GestureService.global(GestureService.GLOBAL_BACK);
                 case "g_home":
@@ -322,6 +324,58 @@ public class Actions {
             return false;
         } finally {
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 等某个状态成立再继续。每半秒查一次，最多等 sec 秒。
+     * 等不到也往下走，但返回 false，运行记录里会标成「有动作失败」。
+     */
+    private static boolean waitUntil(Context c, String what, int sec) {
+        long deadline = System.currentTimeMillis() + Math.max(1, sec) * 1000L;
+        Logx.i(c, "等状态 " + what + "，最多 " + sec + " 秒");
+        while (System.currentTimeMillis() < deadline) {
+            if (stateOk(c, what)) {
+                Logx.i(c, "状态 " + what + " 已成立，继续");
+                return true;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                return false;
+            }
+        }
+        Logx.i(c, "等 " + what + " 超时，继续往下走");
+        return false;
+    }
+
+    private static boolean stateOk(Context c, String what) {
+        switch (what == null ? "" : what) {
+            case "charging": {
+                android.os.BatteryManager bm =
+                        (android.os.BatteryManager) c.getSystemService(Context.BATTERY_SERVICE);
+                return bm != null && bm.isCharging();
+            }
+            case "screen_on": {
+                android.os.PowerManager pm =
+                        (android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                return pm != null && pm.isInteractive();
+            }
+            case "unlocked": {
+                android.app.KeyguardManager km =
+                        (android.app.KeyguardManager) c.getSystemService(Context.KEYGUARD_SERVICE);
+                android.os.PowerManager pm =
+                        (android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                return km != null && pm != null && !km.isKeyguardLocked() && pm.isInteractive();
+            }
+            default: {
+                android.net.ConnectivityManager cm =
+                        (android.net.ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm == null) return false;
+                android.net.Network n = cm.getActiveNetwork();
+                android.net.NetworkCapabilities cap = n == null ? null : cm.getNetworkCapabilities(n);
+                return cap != null && cap.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+            }
         }
     }
 

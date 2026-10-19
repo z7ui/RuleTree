@@ -140,4 +140,88 @@ public class RuleStore {
             return "{}";
         }
     }
+
+    /** 复制一条规则，名字加「副本」，id 换新的，插在原规则后面。 */
+    public static Model.Rule duplicate(Context c, String id) {
+        List<Model.Rule> list = load(c);
+        for (int i = 0; i < list.size(); i++) {
+            Model.Rule src = list.get(i);
+            if (!src.id.equals(id)) continue;
+            try {
+                Model.Rule copy = Model.Rule.fromJson(new JSONObject(src.toJson().toString()));
+                copy.id = java.util.UUID.randomUUID().toString();
+                copy.name = src.name + " 副本";
+                copy.createdAt = System.currentTimeMillis();
+                copy.updatedAt = copy.createdAt;
+                list.add(i + 1, copy);
+                save(c, list);
+                return copy;
+            } catch (Exception e) {
+                Logx.i(c, "复制规则失败: " + e);
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** 只在同一分组内上下移动，避免把规则挪到别的组里。返回是否真的动了。 */
+    public static boolean move(Context c, String id, int delta) {
+        List<Model.Rule> list = load(c);
+        int from = -1;
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).id.equals(id)) {
+                from = i;
+                break;
+            }
+        }
+        if (from < 0) return false;
+        String g = list.get(from).group == null ? "" : list.get(from).group;
+        int to = from + delta;
+        while (to >= 0 && to < list.size()) {
+            String g2 = list.get(to).group == null ? "" : list.get(to).group;
+            if (g2.equals(g)) break;
+            to += delta;
+        }
+        if (to < 0 || to >= list.size()) return false;
+        java.util.Collections.swap(list, from, to);
+        save(c, list);
+        return true;
+    }
+
+    /**
+     * 导入规则。校验到能读、有树才算数；id 撞了就重新分配，不会覆盖本地规则。
+     * 返回导入的条数。
+     */
+    public static int importFrom(Context c, String json) throws Exception {
+        JSONObject root = new JSONObject(json);
+        JSONArray arr = root.optJSONArray("rules");
+        if (arr == null) throw new Exception("这不是规则文件：缺少 rules 数组");
+        if (arr.length() > 500) throw new Exception("一次最多导入 500 条");
+
+        List<Model.Rule> cur = load(c);
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (Model.Rule r : cur) ids.add(r.id);
+
+        int n = 0;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null || o.optJSONObject("tree") == null) continue;
+            Model.Rule r;
+            try {
+                r = Model.Rule.fromJson(o);
+            } catch (Exception e) {
+                continue;
+            }
+            if (r.id == null || r.id.isEmpty() || ids.contains(r.id)) {
+                r.id = java.util.UUID.randomUUID().toString();
+            }
+            ids.add(r.id);
+            if (r.name == null || r.name.trim().isEmpty()) r.name = "导入的规则";
+            cur.add(r);
+            n++;
+        }
+        if (n == 0) throw new Exception("文件里没有可识别的规则");
+        save(c, cur);
+        return n;
+    }
 }

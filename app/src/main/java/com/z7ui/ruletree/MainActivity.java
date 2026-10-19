@@ -4,17 +4,22 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.text.method.ScrollingMovementMethod;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
@@ -25,8 +30,15 @@ import com.google.android.material.materialswitch.MaterialSwitch;
 
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -34,6 +46,48 @@ public class MainActivity extends AppCompatActivity {
     private TextView emptyTip;
     private MaterialCardView permCard;
     private TextView tvPerm;
+
+    /** 导出：写文件。用系统的「新建文档」界面，不申请存储权限。 */
+    private final ActivityResultLauncher<Intent> exportLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
+                if (res.getResultCode() != RESULT_OK || res.getData() == null) return;
+                Uri uri = res.getData().getData();
+                if (uri == null) return;
+                try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    String json = RuleStore.rawJson(this);
+                    out.write(json.getBytes(StandardCharsets.UTF_8));
+                    Toast.makeText(this, "已导出 " + RuleStore.load(this).size() + " 条规则",
+                            Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, "导出失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+
+    /** 导入：读文件、校验、追加。id 撞车会重新分配，不覆盖本地规则。 */
+    private final ActivityResultLauncher<Intent> importLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
+                if (res.getResultCode() != RESULT_OK || res.getData() == null) return;
+                Uri uri = res.getData().getData();
+                if (uri == null) return;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in == null) throw new Exception("打不开这个文件");
+                    byte[] buf = new byte[1024 * 1024];
+                    int n = 0, r;
+                    while (n < buf.length && (r = in.read(buf, n, buf.length - n)) > 0) n += r;
+                    if (n >= buf.length) throw new Exception("文件太大，最多 1MB");
+                    String json = new String(buf, 0, n, StandardCharsets.UTF_8);
+                    int count = RuleStore.importFrom(this, json);
+                    WatchService.sync(this);
+                    renderList();
+                    Toast.makeText(this, "导入 " + count + " 条规则", Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("导入失败")
+                            .setMessage(String.valueOf(e.getMessage()))
+                            .setPositiveButton("知道了", null)
+                            .show();
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,6 +129,8 @@ public class MainActivity extends AppCompatActivity {
         menu.add(0, 4, 3, "清除日志");
         menu.add(0, 5, 4, "关于");
         menu.add(0, 6, 5, "运行记录");
+        menu.add(0, 7, 6, "导出规则");
+        menu.add(0, 8, 7, "导入规则");
         return true;
     }
 
@@ -98,6 +154,12 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             case 6:
                 showRuns();
+                return true;
+            case 7:
+                exportRules();
+                return true;
+            case 8:
+                importRules();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -196,6 +258,97 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** 每条规则上次跑成什么样，一个弹窗看完。 */
+    private void exportRules() {
+        if (RuleStore.load(this).isEmpty()) {
+            Toast.makeText(this, "还没有规则可以导出", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String name = "ruletree-"
+                + new SimpleDateFormat("yyyyMMdd-HHmm", Locale.CHINA).format(new Date()) + ".json";
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/json");
+        i.putExtra(Intent.EXTRA_TITLE, name);
+        try {
+            exportLauncher.launch(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "这台机器没有文件选择器：" + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importRules() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        try {
+            importLauncher.launch(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "这台机器没有文件选择器：" + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 长按卡片出来的菜单：排序、复制、分组、删除。 */
+    private void showRuleMenu(final Model.Rule r) {
+        final String[] items = {"上移", "下移", "复制一条", "设置分组", "删除"};
+        new AlertDialog.Builder(this)
+                .setTitle(r.name)
+                .setItems(items, (d, which) -> {
+                    switch (which) {
+                        case 0:
+                        case 1:
+                            if (!RuleStore.move(this, r.id, which == 0 ? -1 : 1)) {
+                                Toast.makeText(this, "到头了，或者同组里没有别的规则",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                            renderList();
+                            break;
+                        case 2: {
+                            Model.Rule copy = RuleStore.duplicate(this, r.id);
+                            WatchService.sync(this);
+                            renderList();
+                            Toast.makeText(this, copy == null ? "复制失败" : "已复制",
+                                    Toast.LENGTH_SHORT).show();
+                            break;
+                        }
+                        case 3:
+                            askGroup(r);
+                            break;
+                        case 4:
+                            new AlertDialog.Builder(this)
+                                    .setTitle("删除规则")
+                                    .setMessage("确定删除「" + r.name + "」？")
+                                    .setPositiveButton("删除", (dd, w) -> {
+                                        RuleStore.remove(this, r.id);
+                                        WatchService.sync(this);
+                                        renderList();
+                                    })
+                                    .setNegativeButton("取消", null)
+                                    .show();
+                            break;
+                        default:
+                            break;
+                    }
+                })
+                .show();
+    }
+
+    private void askGroup(final Model.Rule r) {
+        final EditText et = new EditText(this);
+        et.setHint("比如「家」「公司」，留空就是不分组的");
+        et.setText(r.group == null ? "" : r.group);
+        new AlertDialog.Builder(this)
+                .setTitle("分组")
+                .setMessage("同一分组的规则会排在一起，列表里带一个小标题。")
+                .setView(et)
+                .setPositiveButton("保存", (d, w) -> {
+                    r.group = et.getText().toString().trim();
+                    RuleStore.upsert(this, r);
+                    renderList();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void showRuns() {
         List<Model.Rule> rules = RuleStore.load(this);
         if (rules.isEmpty()) {
@@ -250,11 +403,21 @@ public class MainActivity extends AppCompatActivity {
 
     private void renderList() {
         listContainer.removeAllViews();
-        List<Model.Rule> rules = RuleStore.load(this);
-        emptyTip.setVisibility(rules.isEmpty() ? View.VISIBLE : View.GONE);
+        List<Model.Rule> loaded = RuleStore.load(this);
+        emptyTip.setVisibility(loaded.isEmpty() ? View.VISIBLE : View.GONE);
+
+        // 按分组排，未分组的排最后；同一组内保持存储顺序（也就是上移下移的结果）
+        List<Model.Rule> rules = new ArrayList<>(loaded);
+        Collections.sort(rules, (a, b) -> groupOf(a).compareTo(groupOf(b)));
 
         LayoutInflater inflater = LayoutInflater.from(this);
+        String lastGroup = null;
         for (final Model.Rule r : rules) {
+            String g = groupOf(r);
+            if (!g.equals(lastGroup)) {
+                addGroupHeader(g);
+                lastGroup = g;
+            }
             View item = inflater.inflate(R.layout.item_rule, listContainer, false);
             TextView name = item.findViewById(R.id.tvName);
             TextView trigger = item.findViewById(R.id.tvTrigger);
@@ -296,8 +459,37 @@ public class MainActivity extends AppCompatActivity {
                 i.putExtra("rid", r.id);
                 startActivity(i);
             });
+            // 长按卡片：排序 / 复制 / 分组 / 删除
+            item.setOnLongClickListener(v -> {
+                showRuleMenu(r);
+                return true;
+            });
             listContainer.addView(item);
         }
+    }
+
+    private String groupOf(Model.Rule r) {
+        if (r.group == null) return "~未分组";
+        String g = r.group.trim();
+        return g.isEmpty() ? "~未分组" : g;
+    }
+
+    private void addGroupHeader(String group) {
+        TextView tv = new TextView(this);
+        String text = "~未分组".equals(group) ? "未分组" : group;
+        tv.setText(text + "（" + countIn(group) + "）");
+        tv.setTextSize(12);
+        tv.setTextColor(ContextCompat.getColor(this, R.color.perm_unknown));
+        tv.setPadding(8, 14, 8, 6);
+        listContainer.addView(tv);
+    }
+
+    private int countIn(String group) {
+        int n = 0;
+        for (Model.Rule r : RuleStore.load(this)) {
+            if (groupOf(r).equals(group)) n++;
+        }
+        return n;
     }
 
     private String summarize(List<Model.Node> list) {

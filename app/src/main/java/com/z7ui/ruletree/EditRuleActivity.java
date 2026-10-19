@@ -222,6 +222,19 @@ public class EditRuleActivity extends AppCompatActivity {
                 row.addView(edit);
             }
 
+            if ("repeat".equals(node.type)) {
+                TextView edit = new TextView(this);
+                edit.setText("改次数");
+                edit.setTextSize(13);
+                edit.setTextColor(ContextCompat.getColor(this, R.color.perm_ok));
+                edit.setPadding(dp(10), dp(6), dp(6), dp(6));
+                edit.setOnClickListener(v -> askNumber("重复几次", node.times, times -> {
+                    node.times = Math.max(1, Math.min(50, times));
+                    render();
+                }, false));
+                row.addView(edit);
+            }
+
             TextView del = new TextView(this);
             del.setText("删除");
             del.setTextSize(13);
@@ -252,6 +265,16 @@ public class EditRuleActivity extends AppCompatActivity {
                 container.addView(elseLabel);
                 container.addView(branchBox(node.otherwise, depth + 1));
             }
+
+            // 循环：把要重复的内容也画出来
+            if ("repeat".equals(node.type)) {
+                TextView label = new TextView(this);
+                label.setText("重复的内容");
+                label.setTextSize(12);
+                label.setPadding(dp(20 + depth * 12), dp(4), 0, dp(2));
+                container.addView(label);
+                container.addView(branchBox(node.children, depth + 1));
+            }
         }
     }
 
@@ -276,14 +299,24 @@ public class EditRuleActivity extends AppCompatActivity {
         return box;
     }
 
-    /** 加东西：动作还是再嵌一层分支 */
+    /** 加东西：动作、再嵌一层分支，或者一个循环 */
     private void addChooser(final List<Model.Node> list, String where) {
-        final String[] items = {"动作", "条件分支（再加一层如果）"};
+        final String[] items = {"动作", "条件分支（再加一层如果）", "重复几次"};
         new AlertDialog.Builder(this)
                 .setTitle("往「" + where + "」里加")
                 .setItems(items, (d, which) -> {
                     if (which == 0) {
                         pickAction(list);
+                    } else if (which == 2) {
+                        askNumber("重复几次", 2, times -> {
+                            Model.Node loop = new Model.Node();
+                            loop.type = "repeat";
+                            loop.times = Math.max(1, Math.min(50, times));
+                            list.add(loop);
+                            render();
+                            Toast.makeText(this, "已加循环，点里面的「＋ 添加」放要重复的动作",
+                                    Toast.LENGTH_SHORT).show();
+                        }, false);
                     } else {
                         Model.Node branch = new Model.Node();
                         branch.type = "if";
@@ -327,7 +360,10 @@ public class EditRuleActivity extends AppCompatActivity {
                 "插上电源时", "拔掉电源时", "电源状态变化时",
                 "收到通知时",
                 "连上蓝牙设备时", "断开蓝牙设备时", "蓝牙连接变化时",
-                "每天固定时间",
+                "每天固定时间", "每月某一天",
+                "屏幕亮起时", "屏幕熄灭时",
+                "插上耳机时", "拔掉耳机时",
+                "打开某个应用时",
                 "手动运行"
         };
         new AlertDialog.Builder(this)
@@ -374,6 +410,28 @@ public class EditRuleActivity extends AppCompatActivity {
                                 return;
                             case 10:
                                 pickTime();
+                                return;
+                            case 11:
+                                pickMonthly();
+                                return;
+                            case 12:
+                                t.type = "screen_state";
+                                t.params.put("watch", "on");
+                                break;
+                            case 13:
+                                t.type = "screen_state";
+                                t.params.put("watch", "off");
+                                break;
+                            case 14:
+                                t.type = "headset_state";
+                                t.params.put("watch", "plugged");
+                                break;
+                            case 15:
+                                t.type = "headset_state";
+                                t.params.put("watch", "unplugged");
+                                break;
+                            case 16:
+                                pickAppTrigger();
                                 return;
                             default:
                                 t.type = "manual";
@@ -454,6 +512,54 @@ public class EditRuleActivity extends AppCompatActivity {
                 askWeekdays(String.format(java.util.Locale.CHINA, "%02d:%02d", h, m)),
                 now.get(java.util.Calendar.HOUR_OF_DAY),
                 now.get(java.util.Calendar.MINUTE), true).show();
+    }
+
+    /** 每月某日：先选几点，再选几号。 */
+    private void pickMonthly() {
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        new android.app.TimePickerDialog(this, (view, h, m) -> {
+            final String hhmm = String.format(java.util.Locale.CHINA, "%02d:%02d", h, m);
+            askNumber("每月几号", 1, day -> {
+                Model.Trigger t = new Model.Trigger();
+                t.type = "time_monthly";
+                try {
+                    t.params.put("hhmm", hhmm);
+                    t.params.put("day", Math.max(1, Math.min(31, day)));
+                } catch (Exception ignored) {
+                }
+                rule.trigger = t;
+                render();
+            }, false);
+        }, now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE), true).show();
+    }
+
+    /** 「打开某个应用时」：从装着应用里挑一个。 */
+    private void pickAppTrigger() {
+        final List<String> pkgs = new ArrayList<>();
+        final List<String> labels = new ArrayList<>();
+        android.content.pm.PackageManager pm = getPackageManager();
+        Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        for (ResolveInfo ri : pm.queryIntentActivities(main, 0)) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkgs.contains(pkg)) continue;
+            pkgs.add(pkg);
+            labels.add(String.valueOf(ri.loadLabel(pm)));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("打开哪个应用时")
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    Model.Trigger t = new Model.Trigger();
+                    t.type = "app_foreground";
+                    try {
+                        t.params.put("pkg", pkgs.get(which));
+                        t.params.put("label", labels.get(which));
+                    } catch (Exception ignored) {
+                    }
+                    rule.trigger = t;
+                    render();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void askWeekdays(final String hhmm) {

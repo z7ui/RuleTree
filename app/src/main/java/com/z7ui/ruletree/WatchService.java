@@ -51,6 +51,8 @@ public class WatchService extends Service {
     private ConnectivityManager.NetworkCallback wifiCallback;
     private BroadcastReceiver powerReceiver;
     private BroadcastReceiver btReceiver;
+    private BroadcastReceiver screenReceiver;
+    private BroadcastReceiver headsetReceiver;
 
     public static void start(Context c) {
         ContextCompat.startForegroundService(c, new Intent(c, WatchService.class));
@@ -86,6 +88,8 @@ public class WatchService extends Service {
         registerWifiCallback();
         registerPowerReceiver();
         registerBluetoothReceiver();
+        registerScreenReceiver();
+        registerHeadsetReceiver();
 
         handler.removeCallbacks(poll);
         handler.postDelayed(poll, POLL_MS);
@@ -236,6 +240,47 @@ public class WatchService extends Service {
         ContextCompat.registerReceiver(this, btReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
+    // ---------------- 屏幕与耳机 ----------------
+
+    /** 亮屏和灭屏只能运行时注册，manifest 里收不到。 */
+    private void registerScreenReceiver() {
+        if (screenReceiver != null) return;
+        screenReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent i) {
+                String a = i.getAction();
+                if (Intent.ACTION_SCREEN_ON.equals(a)) {
+                    Logx.i(WatchService.this, "屏幕亮起");
+                    Engine.fire(WatchService.this, "screen_state", "on");
+                } else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
+                    Logx.i(WatchService.this, "屏幕熄灭");
+                    Engine.fire(WatchService.this, "screen_state", "off");
+                }
+            }
+        };
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_SCREEN_ON);
+        f.addAction(Intent.ACTION_SCREEN_OFF);
+        ContextCompat.registerReceiver(this, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /** 有线耳机插拔。state=1 是插上，0 是拔掉。 */
+    private void registerHeadsetReceiver() {
+        if (headsetReceiver != null) return;
+        headsetReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent i) {
+                int state = i.getIntExtra("state", -1);
+                if (state != 0 && state != 1) return;
+                String watch = state == 1 ? "plugged" : "unplugged";
+                Logx.i(WatchService.this, "耳机" + (state == 1 ? "已插入" : "已拔出"));
+                Engine.fire(WatchService.this, "headset_state", watch);
+            }
+        };
+        IntentFilter f = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
+        ContextCompat.registerReceiver(this, headsetReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
     // ---------------- 前台通知 ----------------
 
     private void startForegroundCompat() {
@@ -287,6 +332,20 @@ public class WatchService extends Service {
             } catch (Exception ignored) {
             }
             btReceiver = null;
+        }
+        if (screenReceiver != null) {
+            try {
+                unregisterReceiver(screenReceiver);
+            } catch (Exception ignored) {
+            }
+            screenReceiver = null;
+        }
+        if (headsetReceiver != null) {
+            try {
+                unregisterReceiver(headsetReceiver);
+            } catch (Exception ignored) {
+            }
+            headsetReceiver = null;
         }
         started = false;
         Logx.i(this, "监听服务已停止");

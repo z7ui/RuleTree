@@ -20,6 +20,8 @@ public class Model {
         public String id = UUID.randomUUID().toString();
         public String name = "";
         public boolean enabled = true;
+        /** 分组名，空表示未分组。只用来给列表分类，不参与执行。 */
+        public String group = "";
         public long createdAt = System.currentTimeMillis();
         public long updatedAt = System.currentTimeMillis();
         public Trigger trigger = new Trigger();
@@ -30,6 +32,7 @@ public class Model {
             r.id = o.optString("id", r.id);
             r.name = o.optString("name", "");
             r.enabled = o.optBoolean("enabled", true);
+            r.group = o.optString("group", "");
             r.createdAt = o.optLong("createdAt", System.currentTimeMillis());
             r.updatedAt = o.optLong("updatedAt", System.currentTimeMillis());
             r.trigger = Trigger.fromJson(o.optJSONObject("trigger"));
@@ -42,6 +45,7 @@ public class Model {
             o.put("id", id);
             o.put("name", name);
             o.put("enabled", enabled);
+            o.put("group", group);
             o.put("createdAt", createdAt);
             o.put("updatedAt", updatedAt);
             o.put("trigger", trigger.toJson());
@@ -107,6 +111,25 @@ public class Model {
                     String hhmm = params.optString("hhmm", "07:00");
                     String days = params.optString("days", "");
                     return days.isEmpty() ? "每天 " + hhmm : daysText(days) + " " + hhmm;
+                }
+                case "time_monthly": {
+                    int day = params.optInt("day", 1);
+                    return "每月 " + day + " 号 " + params.optString("hhmm", "07:00");
+                }
+                case "screen_state": {
+                    String w = watch();
+                    return "on".equals(w) ? "屏幕亮起时"
+                            : "off".equals(w) ? "屏幕熄灭时" : "屏幕亮灭时";
+                }
+                case "headset_state": {
+                    String w = watch();
+                    return "plugged".equals(w) ? "插上耳机时"
+                            : "unplugged".equals(w) ? "拔掉耳机时" : "耳机插拔时";
+                }
+                case "app_foreground": {
+                    String label = params.optString("label", "");
+                    String pkg = params.optString("pkg", "");
+                    return "打开 " + (label.isEmpty() ? (pkg.isEmpty() ? "任意应用" : pkg) : label) + " 时";
                 }
                 default:
                     return "手动运行";
@@ -218,7 +241,7 @@ public class Model {
     // ---------------- 树节点 ----------------
 
     public static class Node {
-        /** action | if | seq */
+        /** action | if | seq | repeat */
         public String type = "action";
         /** action 节点：动作名 */
         public String action = "";
@@ -227,8 +250,10 @@ public class Model {
         public Cond condition;
         public List<Node> then = new ArrayList<>();
         public List<Node> otherwise = new ArrayList<>();
-        /** seq 节点 */
+        /** seq 节点 / repeat 节点的子节点 */
         public List<Node> children = new ArrayList<>();
+        /** repeat 节点：重复几次 */
+        public int times = 2;
 
         public static Node fromJson(JSONObject o) throws JSONException {
             Node n = new Node();
@@ -240,6 +265,7 @@ public class Model {
             n.then = nodeList(o.optJSONArray("then"));
             n.otherwise = nodeList(o.optJSONArray("else"));
             n.children = nodeList(o.optJSONArray("children"));
+            n.times = o.optInt("times", 2);
             return n;
         }
 
@@ -264,6 +290,9 @@ public class Model {
                 o.put("else", nodeArray(otherwise));
             } else if ("seq".equals(type)) {
                 o.put("children", nodeArray(children));
+            } else if ("repeat".equals(type)) {
+                o.put("times", times);
+                o.put("children", nodeArray(children));
             }
             return o;
         }
@@ -285,6 +314,9 @@ public class Model {
                 String b = otherwise.isEmpty() ? "什么也不做"
                         : otherwise.get(0).describe() + (otherwise.size() > 1 ? "等 " + otherwise.size() + " 步" : "");
                 return "如果" + c + "，则" + a + "，否则" + b;
+            }
+            if ("repeat".equals(type)) {
+                return "重复 " + times + " 次（" + children.size() + " 步）";
             }
             return "按顺序执行 " + children.size() + " 步";
         }

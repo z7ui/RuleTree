@@ -43,7 +43,9 @@ public class TimeScheduler {
 
         int count = 0;
         for (Model.Rule r : rules) {
-            if (!r.enabled || !"time_daily".equals(r.trigger.type)) continue;
+            if (!r.enabled) continue;
+            String type = r.trigger.type;
+            if (!"time_daily".equals(type) && !"time_monthly".equals(type)) continue;
             long at = nextAt(r.trigger);
             if (at <= 0) {
                 Logx.i(c, "定时「" + r.name + "」算不出下次时间，跳过");
@@ -129,6 +131,7 @@ public class TimeScheduler {
 
     /** 下一次该响的时间戳。算不出来返回 0。 */
     public static long nextAt(Model.Trigger t) {
+        if ("time_monthly".equals(t.type)) return nextMonthly(t);
         int hhmm = minutes(t.params.optString("hhmm", "07:00"));
         if (hhmm < 0) return 0;
         boolean[] days = parseDays(t.params.optString("days", ""));
@@ -149,6 +152,33 @@ public class TimeScheduler {
         for (int i = 0; i < 8; i++) {
             if (days[isoDay(c) - 1]) return c.getTimeInMillis();
             c.add(Calendar.DAY_OF_YEAR, 1);
+        }
+        return 0;
+    }
+
+    /** 每月某日。月份没有那一天（比如 2 月 30 号）就跳到下个月。 */
+    private static long nextMonthly(Model.Trigger t) {
+        int hhmm = minutes(t.params.optString("hhmm", "07:00"));
+        if (hhmm < 0) return 0;
+        int day = Math.max(1, Math.min(31, t.params.optInt("day", 1)));
+
+        Calendar base = Calendar.getInstance();
+        base.set(Calendar.DAY_OF_MONTH, 1);
+        base.set(Calendar.HOUR_OF_DAY, hhmm / 60);
+        base.set(Calendar.MINUTE, hhmm % 60);
+        base.set(Calendar.SECOND, 0);
+        base.set(Calendar.MILLISECOND, 0);
+
+        for (int i = 0; i < 14; i++) {
+            int max = base.getActualMaximum(Calendar.DAY_OF_MONTH);
+            if (day <= max) {
+                Calendar hit = (Calendar) base.clone();
+                hit.set(Calendar.DAY_OF_MONTH, day);
+                if (hit.getTimeInMillis() > System.currentTimeMillis()) {
+                    return hit.getTimeInMillis();
+                }
+            }
+            base.add(Calendar.MONTH, 1);
         }
         return 0;
     }

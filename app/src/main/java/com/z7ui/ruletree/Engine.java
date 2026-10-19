@@ -56,6 +56,26 @@ public class Engine {
         });
     }
 
+    /**
+     * 前台应用切换。包名由无障碍事件流提供（只记包名，不读界面），
+     * 只有真的换了应用才触发，同一应用反复弹窗不会重复跑。
+     */
+    public static void fireApp(final Context c, final String pkg) {
+        if (pkg == null || pkg.isEmpty()) return;
+        final Context app = c.getApplicationContext();
+        WORKER.execute(() -> {
+            int hit = 0;
+            for (Model.Rule r : RuleStore.load(app)) {
+                if (!r.enabled || !"app_foreground".equals(r.trigger.type)) continue;
+                String want = r.trigger.params.optString("pkg", "");
+                if (want.isEmpty() || !want.equals(pkg)) continue;
+                Logx.i(app, "前台切到 " + pkg + "，命中「" + r.name + "」");
+                run(app, r);
+                hit++;
+            }
+        });
+    }
+
     /** 蓝牙触发：参数里可以限定设备 MAC，空表示任意设备。 */
     public static void fireBluetooth(final Context c, final String watch, final String mac) {
         final Context app = c.getApplicationContext();
@@ -138,6 +158,14 @@ public class Engine {
             case "seq":
                 runNodes(c, n.children, ctx);
                 break;
+            case "repeat": {
+                int times = Math.max(1, Math.min(50, n.times));
+                Logx.i(c, "重复 " + times + " 次（" + n.children.size() + " 步）");
+                for (int i = 0; i < times && !ctx.aborted; i++) {
+                    runNodes(c, n.children, ctx);
+                }
+                break;
+            }
             default:
                 Logx.i(c, "未知节点类型，跳过: " + n.type);
         }

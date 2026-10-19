@@ -27,6 +27,7 @@
   "id": "b1f7...（UUID）",
   "name": "回家静音",
   "enabled": true,
+  "group": "家（可选，空表示不分组）",
   "createdAt": 1792400000000,
   "updatedAt": 1792400000000,
   "trigger": Trigger,
@@ -49,6 +50,10 @@ v1 支持的触发器：
 | `notification` | `pkg`（空为任意）、`label`（显示用）、`keyword`（空为不限） | 收到通知时触发，需要「通知使用权」 |
 | `bluetooth_state` | `watch`、`mac`（空为任意设备）、`label`（显示用） | 蓝牙设备连上或断开时触发。Android 12 起读设备名需要 `BLUETOOTH_CONNECT` |
 | `time_daily` | `hhmm`（"HH:mm"）、`days`（"1,3,5"，周一=1；空串=每天） | 每天固定时间触发，走 `AlarmManager`。没拿到精确闹钟权限时退化成 10 分钟窗口 |
+| `time_monthly` | `day`（1-31）、`hhmm` | 每月某日。月份没有那一天就跳到下个月 |
+| `screen_state` | `watch`: `on` / `off` / `any` | 屏幕亮起或熄灭 |
+| `headset_state` | `watch`: `plugged` / `unplugged` / `any` | 有线耳机插拔 |
+| `app_foreground` | `pkg`、`label` | 某个应用被打开。包名来自无障碍事件流，只记包名 |
 | `manual` | 无 | 只能手动运行，用来测试 |
 
 触发器只负责「什么时候跑」，不做判断。判断是树里的事。这个分离是故意的：
@@ -72,6 +77,9 @@ v1 支持的触发器：
 
 // seq 节点：按顺序执行子节点
 { "type": "seq", "children": [ Node, Node, ... ] }
+
+// repeat 节点：把 children 重复 times 次
+{ "type": "repeat", "times": 3, "children": [ Node, Node, ... ] }
 ```
 
 `then` / `else` / `children` 是**节点数组**，元素可以是任意类型的节点，包括再嵌一层 `if`。
@@ -162,6 +170,7 @@ v1 支持的叶子条件：
 | `delay` | `ms`（毫秒，上限 30000） | 等一会儿再继续。引擎在后台线程跑，不会卡界面 |
 | `confirm` | `text`、`sec`（默认 15） | 发通知等用户点「执行」。超时或点「算了」会取消这一支剩下的动作 |
 | `wait_unlock` | `sec`（默认 60） | 锁屏时先停住，解锁后继续；超时也往下走 |
+| `wait_until` | `what`: `wifi` / `charging` / `screen_on` / `unlocked`、`sec` | 等某个状态成立再继续，每 500ms 查一次；超时往下走但记为失败 |
 | `stop` | 无 | 主动结束这一支，后面的动作都不执行 |
 
 ## 三、完整示例

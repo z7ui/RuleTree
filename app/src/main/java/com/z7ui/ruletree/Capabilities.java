@@ -202,6 +202,10 @@ public class Capabilities {
         a("confirm", "执行前确认", "流程", "", null, true);
         a("wait_unlock", "等到解锁", "流程", "等待解锁，最多 %s 秒",
                 "锁屏时先停住，解锁后再继续", false, "sec|最多等几秒|int|60");
+        a("wait_until", "等某个状态", "流程", "等到 %s，最多 %s 秒",
+                "每半秒查一次，等到了再往下走；等不到就到超时", false,
+                "what|等什么|choice|wifi|wifi=连上 Wi-Fi,charging=开始充电,screen_on=屏幕亮着,unlocked=已解锁",
+                "sec|最多等几秒|int|60");
         a("stop", "停止这一支", "流程", "停止这一支剩下的动作", null, false);
     }
 

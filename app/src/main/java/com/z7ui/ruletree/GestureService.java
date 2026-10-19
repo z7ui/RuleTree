@@ -216,11 +216,18 @@ public class GestureService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // 只取包名：用来判断「当前应用是」这个条件。界面内容一概不读。
+        // 只取包名：用来判断「当前应用是」这个条件，以及「打开某应用」这个触发器。
+        // 界面内容一概不读。
         if (event == null) return;
         try {
             CharSequence p = event.getPackageName();
-            if (p != null && p.length() > 0) lastPkg = p.toString();
+            if (p == null || p.length() == 0) return;
+            String pkg = p.toString();
+            String old = lastPkg;
+            lastPkg = pkg;
+            if (old != null && !old.equals(pkg)) {
+                Engine.fireApp(this, pkg);
+            }
         } catch (Exception ignored) {
         }
     }

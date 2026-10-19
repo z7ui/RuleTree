@@ -361,6 +361,7 @@ public class EditRuleActivity extends AppCompatActivity {
                 "收到通知时",
                 "连上蓝牙设备时", "断开蓝牙设备时", "蓝牙连接变化时",
                 "每天固定时间", "每月某一天",
+                "日出时", "日落时",
                 "屏幕亮起时", "屏幕熄灭时",
                 "插上耳机时", "拔掉耳机时",
                 "打开某个应用时",
@@ -415,22 +416,32 @@ public class EditRuleActivity extends AppCompatActivity {
                                 pickMonthly();
                                 return;
                             case 12:
+                                t.type = "sun_event";
+                                t.params.put("event", "sunrise");
+                                t.params.put("offset", 0);
+                                break;
+                            case 13:
+                                t.type = "sun_event";
+                                t.params.put("event", "sunset");
+                                t.params.put("offset", 0);
+                                break;
+                            case 14:
                                 t.type = "screen_state";
                                 t.params.put("watch", "on");
                                 break;
-                            case 13:
+                            case 15:
                                 t.type = "screen_state";
                                 t.params.put("watch", "off");
                                 break;
-                            case 14:
+                            case 16:
                                 t.type = "headset_state";
                                 t.params.put("watch", "plugged");
                                 break;
-                            case 15:
+                            case 17:
                                 t.type = "headset_state";
                                 t.params.put("watch", "unplugged");
                                 break;
-                            case 16:
+                            case 18:
                                 pickAppTrigger();
                                 return;
                             default:

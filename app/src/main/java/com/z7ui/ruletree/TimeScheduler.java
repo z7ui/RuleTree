@@ -45,8 +45,9 @@ public class TimeScheduler {
         for (Model.Rule r : rules) {
             if (!r.enabled) continue;
             String type = r.trigger.type;
-            if (!"time_daily".equals(type) && !"time_monthly".equals(type)) continue;
-            long at = nextAt(r.trigger);
+            if (!"time_daily".equals(type) && !"time_monthly".equals(type)
+                    && !"sun_event".equals(type)) continue;
+            long at = nextAt(c, r.trigger);
             if (at <= 0) {
                 Logx.i(c, "定时「" + r.name + "」算不出下次时间，跳过");
                 continue;
@@ -130,6 +131,26 @@ public class TimeScheduler {
     }
 
     /** 下一次该响的时间戳。算不出来返回 0。 */
+    public static long nextAt(Context c, Model.Trigger t) {
+        if ("sun_event".equals(t.type)) return nextSun(c, t);
+        return nextAt(t);
+    }
+
+    /**
+     * 日出或日落。今天已经过了就加 24 小时——日出时刻一天只差几十秒，
+     * 不值得再算一遍明天，等它响过之后 sync 会重排。
+     */
+    private static long nextSun(Context c, Model.Trigger t) {
+        long[] s = Sun.today(c);
+        if (s == null) return 0;
+        boolean sunrise = !"sunset".equals(t.params.optString("event", "sunrise"));
+        long at = sunrise ? s[0] : s[1];
+        int offset = Math.max(-120, Math.min(120, t.params.optInt("offset", 0)));
+        at += offset * 60000L;
+        if (at <= System.currentTimeMillis()) at += 24 * 3600 * 1000L;
+        return at;
+    }
+
     public static long nextAt(Model.Trigger t) {
         if ("time_monthly".equals(t.type)) return nextMonthly(t);
         int hhmm = minutes(t.params.optString("hhmm", "07:00"));

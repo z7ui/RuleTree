@@ -131,6 +131,13 @@ public class Model {
                     String pkg = params.optString("pkg", "");
                     return "打开 " + (label.isEmpty() ? (pkg.isEmpty() ? "任意应用" : pkg) : label) + " 时";
                 }
+                case "sun_event": {
+                    boolean rise = !"sunset".equals(params.optString("event", "sunrise"));
+                    int off = params.optInt("offset", 0);
+                    String base = rise ? "日出" : "日落";
+                    if (off == 0) return base + "时";
+                    return base + (off > 0 ? "后 " : "前 ") + Math.abs(off) + " 分钟";
+                }
                 default:
                     return "手动运行";
             }

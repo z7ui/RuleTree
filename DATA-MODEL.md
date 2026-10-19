@@ -54,6 +54,7 @@ v1 支持的触发器：
 | `screen_state` | `watch`: `on` / `off` / `any` | 屏幕亮起或熄灭 |
 | `headset_state` | `watch`: `plugged` / `unplugged` / `any` | 有线耳机插拔 |
 | `app_foreground` | `pkg`、`label` | 某个应用被打开。包名来自无障碍事件流，只记包名 |
+| `sun_event` | `event`: `sunrise` / `sunset`、`offset`（分钟，可负） | 日出或日落时。位置取系统最后已知位置，算不到就按 06:00 / 18:00 估 |
 | `manual` | 无 | 只能手动运行，用来测试 |
 
 触发器只负责「什么时候跑」，不做判断。判断是树里的事。这个分离是故意的：

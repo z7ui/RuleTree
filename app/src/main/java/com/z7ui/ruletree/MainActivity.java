@@ -131,6 +131,7 @@ public class MainActivity extends AppCompatActivity {
         menu.add(0, 6, 5, "运行记录");
         menu.add(0, 7, 6, "导出规则");
         menu.add(0, 8, 7, "导入规则");
+        menu.add(0, 9, 8, "备份与恢复");
         return true;
     }
 
@@ -150,7 +151,7 @@ public class MainActivity extends AppCompatActivity {
                 clearLog();
                 return true;
             case 5:
-                showAbout();
+                startActivity(new Intent(this, AboutActivity.class));
                 return true;
             case 6:
                 showRuns();
@@ -160,6 +161,9 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             case 8:
                 importRules();
+                return true;
+            case 9:
+                showBackupMenu();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -370,6 +374,49 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, "已清除运行记录", Toast.LENGTH_SHORT).show();
                 })
                 .show();
+    }
+
+    private void showBackupMenu() {
+        new AlertDialog.Builder(this)
+                .setTitle("备份与恢复")
+                .setItems(new String[]{"导出配置到文件", "从文件导入配置"}, (d, which) -> {
+                    if (which == 0) {
+                        Backup.startExport(this);
+                    } else {
+                        new AlertDialog.Builder(this)
+                                .setTitle("导入会覆盖当前配置")
+                                .setMessage("现有的规则和设置会被文件里的内容替换。建议先导出一份。")
+                                .setPositiveButton("继续导入", (dd, ww) -> Backup.startImport(this))
+                                .setNegativeButton("取消", null)
+                                .show();
+                    }
+                })
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        Uri uri = data.getData();
+        if (requestCode == Backup.REQ_EXPORT) {
+            try {
+                Backup.writeUri(this, uri, Backup.dump(this));
+                Toast.makeText(this, "已导出", Toast.LENGTH_SHORT).show();
+            } catch (Throwable t) {
+                Toast.makeText(this, "导出失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        } else if (requestCode == Backup.REQ_IMPORT) {
+            try {
+                int n = Backup.restore(this, Backup.readUri(this, uri));
+                Toast.makeText(this, "已导入 " + n + " 项配置", Toast.LENGTH_LONG).show();
+                recreate();
+            } catch (Throwable t) {
+                Toast.makeText(this, "导入失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     private void showAbout() {
